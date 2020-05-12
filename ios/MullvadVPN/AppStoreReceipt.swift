@@ -11,7 +11,7 @@ import Foundation
 import StoreKit
 
 enum AppStoreReceipt {
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         /// AppStore receipt file does not exist or file URL is not available
         case doesNotExist
 
@@ -21,14 +21,14 @@ enum AppStoreReceipt {
         /// Failure to refresh the receipt from AppStore
         case refresh(Swift.Error)
 
-        var localizedDescription: String {
+        var errorDescription: String? {
             switch self {
             case .doesNotExist:
                 return "AppStore receipt file does not exist on disk"
-            case .io(let ioError):
-                return "Read error: \(ioError.localizedDescription)"
-            case .refresh(let refreshError):
-                return "Receipt refresh error: \(refreshError.localizedDescription)"
+            case .io:
+                return "Read error"
+            case .refresh:
+                return "Receipt refresh error"
             }
         }
     }

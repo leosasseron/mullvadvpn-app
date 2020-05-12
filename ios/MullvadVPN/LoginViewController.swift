@@ -170,6 +170,9 @@ class LoginViewController: UIViewController, RootContainment {
                 case .finished:
                     self.endLogin(.success(.newAccount))
                 case .failure(let error):
+                    os_log(.error, "%{public}s",
+                           error.displayChain(message: "Failed to log in with new account"))
+                    
                     self.endLogin(.failure(error))
                 }
             }, receiveValue: { (newAccountToken) in

@@ -12,7 +12,7 @@ import NetworkExtension
 import os
 
 /// An error emitted by all public methods of TunnelManager
-enum TunnelManagerError: Error {
+enum TunnelManagerError: ChainedError {
     /// Account token is not set
     case missingAccount
 
@@ -107,25 +107,25 @@ extension TunnelManagerError: LocalizedError {
 
 }
 
-enum TunnelIpcRequestError: Error {
+enum TunnelIpcRequestError: ChainedError {
     /// IPC is not set yet
     case missingIpc
 
     /// A failure to submit or handle the IPC request
-    case send(PacketTunnelIpcError)
+    case send(PacketTunnelIpc.Error)
 
-    var localizedDescription: String {
+    var errorDescription: String? {
         switch self {
         case .missingIpc:
             return "IPC is not initialized yet"
 
-        case .send(let ipcError):
-            return "Failure to send an IPC request: \(ipcError.localizedDescription)"
+        case .send:
+            return "Failure to send an IPC request"
         }
     }
 }
 
-enum SetAccountError: Error {
+enum SetAccountError: ChainedError {
     /// A failure to make the tunnel configuration
     case makeTunnelConfiguration(TunnelConfigurationManager.Error)
 
@@ -139,7 +139,7 @@ enum SetAccountError: Error {
     case setup(SetupTunnelError)
 }
 
-enum UnsetAccountError: Error {
+enum UnsetAccountError: ChainedError {
     /// A failure to remove the system tunnel
     case removeTunnel(Error)
 
@@ -147,7 +147,7 @@ enum UnsetAccountError: Error {
     case removeTunnelConfiguration(TunnelConfigurationManager.Error)
 }
 
-enum RegenerateWireguardPrivateKeyError: Error {
+enum RegenerateWireguardPrivateKeyError: ChainedError {
     /// A failure to read the public Wireguard key from Keychain
     case readPublicWireguardKey(TunnelConfigurationManager.Error)
 
@@ -158,7 +158,7 @@ enum RegenerateWireguardPrivateKeyError: Error {
     case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 }
 
-enum StartTunnelError: Error {
+enum StartTunnelError: ChainedError {
     /// An error that happened during the tunnel setup stage
     case setup(SetupTunnelError)
 
@@ -166,7 +166,7 @@ enum StartTunnelError: Error {
     case system(Error)
 }
 
-enum SetupTunnelError: Error {
+enum SetupTunnelError: ChainedError {
     /// A failure to load a list of tunnels associated with the app
     case loadTunnels(Error)
 
@@ -180,7 +180,7 @@ enum SetupTunnelError: Error {
     case obtainKeychainRef(TunnelConfigurationManager.Error)
 }
 
-enum LoadTunnelError: Error {
+enum LoadTunnelError: ChainedError {
     /// A failure to load a list of tunnels associated with the app
     case loadTunnels(Error)
 
@@ -190,7 +190,7 @@ enum LoadTunnelError: Error {
     case removeInconsistentTunnel(Error)
 }
 
-enum MapConnectionStatusError: Error {
+enum MapConnectionStatusError: ChainedError {
     /// A failure to send a subsequent IPC request to collect more information, such as tunnel
     /// connection info.
     case ipcRequest(TunnelIpcRequestError)
@@ -674,7 +674,7 @@ class TunnelManager {
     /// IPC interactor helper that automatically maps the `PacketTunnelIpcError` to
     /// `TunnelIpcRequestError`
     private func executeIpcRequest<T>(
-        _ body: @escaping (PacketTunnelIpc) -> AnyPublisher<T, PacketTunnelIpcError>
+        _ body: @escaping (PacketTunnelIpc) -> AnyPublisher<T, PacketTunnelIpc.Error>
     ) -> AnyPublisher<T, TunnelIpcRequestError>
     {
         Just(tunnelIpc)

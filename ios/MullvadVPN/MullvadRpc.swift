@@ -73,7 +73,7 @@ class MullvadRpc {
     }
 
     /// An error type emitted by `MullvadRpc`
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         /// A network communication error
         case network(URLError)
 
@@ -86,19 +86,19 @@ class MullvadRpc {
         /// An error occured when encoding the JSON request
         case encoding(Swift.Error)
 
-        var localizedDescription: String {
+        var errorDescription: String? {
             switch self {
-            case .network(let urlError):
-                return "Network error: \(urlError.localizedDescription)"
+            case .network:
+                return "Network error"
 
-            case .server(let serverError):
-                return "Server error: \(serverError.localizedDescription)"
+            case .server:
+                return "Server error"
 
-            case .encoding(let encodingError):
-                return "Encoding error: \(encodingError.localizedDescription)"
+            case .encoding:
+                return "Encoding error"
 
-            case .decoding(let decodingError):
-                return "Decoding error: \(decodingError.localizedDescription)"
+            case .decoding:
+                return "Decoding error"
             }
         }
     }

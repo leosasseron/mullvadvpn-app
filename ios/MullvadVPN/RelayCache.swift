@@ -11,7 +11,7 @@ import Combine
 import os
 
 /// Error emitted by read and write functions
-enum RelayCacheError: Error {
+enum RelayCacheError: ChainedError {
     case defaultLocationNotFound
     case io(Error)
     case coding(Error)

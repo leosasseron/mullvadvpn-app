@@ -12,83 +12,6 @@ import NetworkExtension
 import StoreKit
 import os
 
-/// A enum describing the errors emitted by `Account`
-enum AccountError: Error {
-    /// A failure to perform the login
-    case login(AccountLoginError)
-
-    /// A failure to login with the new account
-    case createNew(CreateAccountError)
-
-    /// A failure to log out
-    case logout(TunnelManagerError)
-}
-
-/// A enum describing the error emitted during login
-enum AccountLoginError: Error {
-    case rpc(MullvadRpc.Error)
-    case tunnelConfiguration(TunnelManagerError)
-}
-
-enum CreateAccountError: Error {
-    case rpc(MullvadRpc.Error)
-    case tunnelConfiguration(TunnelManagerError)
-}
-
-extension AccountError: LocalizedError {
-    var errorDescription: String? {
-        switch self {
-        case .login:
-            return NSLocalizedString("Log in error", comment: "")
-
-        case .logout:
-            return NSLocalizedString("Log out error", comment: "")
-
-        case .createNew:
-            return NSLocalizedString("Create account error", comment: "")
-        }
-    }
-
-    var failureReason: String? {
-        switch self {
-        case .createNew(.rpc):
-            return NSLocalizedString("Failed to create new account", comment: "")
-
-        case .login(.rpc(.server(let serverError))) where serverError.code == .accountDoesNotExist:
-            return NSLocalizedString("Invalid account", comment: "")
-
-        case .login(.rpc(.network)):
-            return NSLocalizedString("Network error", comment: "")
-
-        case .login(.rpc(.server)):
-            return NSLocalizedString("Server error", comment: "")
-
-        case .login(.tunnelConfiguration(.setAccount(let setAccountError))),
-             .createNew(.tunnelConfiguration(.setAccount(let setAccountError))):
-            switch setAccountError {
-            case .pushWireguardKey(.network):
-                return NSLocalizedString("Network error", comment: "")
-
-            case .pushWireguardKey(.server(let serverError)):
-                return serverError.errorDescription ?? serverError.message
-
-            case .setup(.saveTunnel(let systemError as NEVPNError))
-                where systemError.code == .configurationReadWriteFailed:
-                return NSLocalizedString("Permission denied to add a VPN profile", comment: "")
-
-            default:
-                return NSLocalizedString("Internal error", comment: "")
-            }
-
-        case .logout:
-            return NSLocalizedString("Internal error", comment: "")
-
-        default:
-            return nil
-        }
-    }
-}
-
 /// A enum holding the `UserDefaults` string keys
 private enum UserDefaultsKeys: String {
     case isAgreedToTermsOfService = "isAgreedToTermsOfService"
@@ -98,6 +21,14 @@ private enum UserDefaultsKeys: String {
 
 /// A class that groups the account related operations
 class Account {
+
+    enum Error: ChainedError {
+        /// A failure to complete an RPC request
+        case rpc(MullvadRpc.Error)
+
+        /// A failure to configure a tunnel
+        case tunnelConfiguration(TunnelManagerError)
+    }
 
     /// A notification name used to broadcast the changes to account expiry
     static let didUpdateAccountExpiryNotification = Notification.Name("didUpdateAccountExpiry")
@@ -136,43 +67,43 @@ class Account {
         UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isAgreedToTermsOfService.rawValue)
     }
 
-    func loginWithNewAccount() -> AnyPublisher<String, AccountError> {
+    func loginWithNewAccount() -> AnyPublisher<String, Error> {
         return rpc.createAccount()
-            .mapError { CreateAccountError.rpc($0) }
+            .mapError { .rpc($0) }
             .flatMap { (newAccountToken) in
                 TunnelManager.shared.setAccount(accountToken: newAccountToken)
-                    .mapError { CreateAccountError.tunnelConfiguration($0) }
+                    .mapError { .tunnelConfiguration($0) }
                     .map { (newAccountToken, Date()) }
-        }.mapError { AccountError.createNew($0) }
-            .receive(on: DispatchQueue.main)
-            .map { (accountToken, expiry) -> String in
-                self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
+        }
+        .receive(on: DispatchQueue.main)
+        .map { (accountToken, expiry) -> String in
+            self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
 
-                return accountToken
+            return accountToken
         }.eraseToAnyPublisher()
     }
 
     /// Perform the login and save the account token along with expiry (if available) to the
     /// application preferences.
-    func login(with accountToken: String) -> AnyPublisher<(), AccountError> {
+    func login(with accountToken: String) -> AnyPublisher<(), Error> {
         return rpc.getAccountExpiry(accountToken: accountToken)
-            .mapError { AccountLoginError.rpc($0) }
+            .mapError { .rpc($0) }
             .flatMap { (expiry) in
                 TunnelManager.shared.setAccount(accountToken: accountToken)
-                    .mapError { AccountLoginError.tunnelConfiguration($0) }
+                    .mapError { .tunnelConfiguration($0) }
                     .map { expiry }
-        }.mapError { AccountError.login($0) }
-            .receive(on: DispatchQueue.main)
-            .map { (expiry) in
-                self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
+        }
+        .receive(on: DispatchQueue.main)
+        .map { (expiry) in
+            self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
         }.eraseToAnyPublisher()
     }
 
     /// Perform the logout by erasing the account token and expiry from the application preferences.
-    func logout() -> AnyPublisher<(), AccountError> {
+    func logout() -> AnyPublisher<(), Error> {
         return TunnelManager.shared.unsetAccount()
             .receive(on: DispatchQueue.main)
-            .mapError { AccountError.logout($0) }
+            .mapError { .tunnelConfiguration($0) }
             .map(self.removeAccountFromPreferences)
             .eraseToAnyPublisher()
     }

@@ -19,34 +19,6 @@ enum PacketTunnelRequest: Int, Codable {
     case tunnelInformation
 }
 
-enum PacketTunnelIpcError: Error {
-    /// A failure to encode the request
-    case encoding(Error)
-
-    /// A failure to decode the response
-    case decoding(Error)
-
-    /// A failure to send the IPC request
-    case send(Error)
-
-    /// A failure that's raised when the IPC response does not contain any data however the decoder
-    /// expected to receive data for decoding
-    case nilResponse
-
-    var localizedDescription: String {
-        switch self {
-        case .encoding(let error):
-            return "Encoding failure: \(error.localizedDescription)"
-        case .decoding(let error):
-            return "Decoding failure: \(error.localizedDescription)"
-        case .send(let error):
-            return "Submission failure: \(error.localizedDescription)"
-        case .nilResponse:
-            return "Unexpected nil response from the tunnel"
-        }
-    }
-}
-
 /// A struct that holds the basic information regarding the tunnel connection
 struct TunnelConnectionInfo: Codable, Equatable {
     let ipv4Relay: IPv4Endpoint
@@ -64,39 +36,68 @@ extension TunnelConnectionInfo: CustomDebugStringConvertible {
     }
 }
 
-enum PacketTunnelIpcHandlerError: Error {
-    /// A failure to encode the request
-    case encoding(Error)
-
-    /// A failure to decode the response
-    case decoding(Error)
-
-    /// A failure to process the request
-    case processing(Error)
-}
-
 enum PacketTunnelIpcHandler {}
 
 extension PacketTunnelIpcHandler {
 
-    static func decodeRequest(messageData: Data) -> AnyPublisher<PacketTunnelRequest, PacketTunnelIpcHandlerError> {
+    enum Error: ChainedError {
+        /// A failure to encode the request
+        case encoding(Swift.Error)
+
+        /// A failure to decode the response
+        case decoding(Swift.Error)
+
+        /// A failure to process the request
+        case processing(Swift.Error)
+    }
+
+
+    static func decodeRequest(messageData: Data) -> AnyPublisher<PacketTunnelRequest, Error> {
         return Just(messageData)
-            .setFailureType(to: PacketTunnelIpcHandlerError.self)
+            .setFailureType(to: Error.self)
             .decode(type: PacketTunnelRequest.self, decoder: JSONDecoder())
-            .mapError { PacketTunnelIpcHandlerError.decoding($0) }
+            .mapError { .decoding($0) }
             .eraseToAnyPublisher()
     }
 
-    static func encodeResponse<T>(response: T) -> AnyPublisher<Data, PacketTunnelIpcHandlerError> where T: Encodable {
+    static func encodeResponse<T>(response: T) -> AnyPublisher<Data, Error> where T: Encodable {
         return Just(response)
-            .setFailureType(to: PacketTunnelIpcHandlerError.self)
+            .setFailureType(to: Error.self)
             .encode(encoder: JSONEncoder())
-            .mapError { PacketTunnelIpcHandlerError.encoding($0) }
+            .mapError { .encoding($0) }
             .eraseToAnyPublisher()
     }
 }
 
 class PacketTunnelIpc {
+
+    enum Error: ChainedError {
+        /// A failure to encode the request
+        case encoding(Swift.Error)
+
+        /// A failure to decode the response
+        case decoding(Swift.Error)
+
+        /// A failure to send the IPC request
+        case send(Swift.Error)
+
+        /// A failure that's raised when the IPC response does not contain any data however the decoder
+        /// expected to receive data for decoding
+        case nilResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .encoding:
+                return "Encoding failure"
+            case .decoding:
+                return "Decoding failure"
+            case .send:
+                return "Submission failure"
+            case .nilResponse:
+                return "Unexpected nil response from the tunnel"
+            }
+        }
+    }
 
     let session: VPNTunnelProviderSessionProtocol
 
@@ -104,38 +105,38 @@ class PacketTunnelIpc {
         self.session = session
     }
 
-    func reloadConfiguration() -> AnyPublisher<(), PacketTunnelIpcError> {
+    func reloadConfiguration() -> AnyPublisher<(), Error> {
         return send(message: .reloadConfiguration)
     }
 
-    func getTunnelInformation() -> AnyPublisher<TunnelConnectionInfo, PacketTunnelIpcError> {
+    func getTunnelInformation() -> AnyPublisher<TunnelConnectionInfo, Error> {
         return send(message: .tunnelInformation)
     }
 
-    private func send(message: PacketTunnelRequest) -> AnyPublisher<(), PacketTunnelIpcError> {
+    private func send(message: PacketTunnelRequest) -> AnyPublisher<(), Error> {
         return sendWithoutDecoding(message: message)
             .map { _ in () }.eraseToAnyPublisher()
     }
 
-    private func send<T>(message: PacketTunnelRequest) -> AnyPublisher<T, PacketTunnelIpcError> where T: Decodable {
+    private func send<T>(message: PacketTunnelRequest) -> AnyPublisher<T, Error> where T: Decodable {
         return sendWithoutDecoding(message: message)
             .replaceNil(with: .nilResponse)
             .decode(type: T.self, decoder: JSONDecoder())
-            .mapError { PacketTunnelIpcError.decoding($0) }
+            .mapError { Error.decoding($0) }
             .eraseToAnyPublisher()
     }
 
-    private func sendWithoutDecoding(message: PacketTunnelRequest) -> AnyPublisher<Data?, PacketTunnelIpcError> {
+    private func sendWithoutDecoding(message: PacketTunnelRequest) -> AnyPublisher<Data?, Error> {
         return Just(message)
-            .setFailureType(to: PacketTunnelIpcError.self)
+            .setFailureType(to: Error.self)
             .encode(encoder: JSONEncoder())
-            .mapError { PacketTunnelIpcError.encoding($0) }
+            .mapError { Error.encoding($0) }
             .flatMap(self.sendProviderMessage)
-            .mapError { PacketTunnelIpcError.send($0) }
+            .mapError { .send($0) }
             .eraseToAnyPublisher()
     }
 
-    private func sendProviderMessage(_ messageData: Data) -> Future<Data?, Error> {
+    private func sendProviderMessage(_ messageData: Data) -> Future<Data?, Swift.Error> {
         return Future { (fulfill) in
             do {
                 try self.session.sendProviderMessage(messageData, responseHandler: { (response) in

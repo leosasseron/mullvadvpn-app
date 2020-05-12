@@ -19,7 +19,7 @@ enum TunnelConfigurationManager {}
 
 extension TunnelConfigurationManager {
 
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         /// A failure to encode the given tunnel configuration
         case encode(Swift.Error)
 

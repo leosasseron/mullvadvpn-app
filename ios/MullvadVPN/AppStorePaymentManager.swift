@@ -83,15 +83,11 @@ protocol AppStorePaymentManagerDelegate: class {
 
 class AppStorePaymentManager {
 
-    enum SendAppStoreReceiptError: Swift.Error {
-        case read(AppStoreReceipt.Error)
-        case rpc(MullvadRpc.Error)
-    }
-
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         case noAccountSet
         case storePayment(Swift.Error)
-        case sendReceipt(SendAppStoreReceiptError)
+        case readReceipt(AppStoreReceipt.Error)
+        case sendReceipt(MullvadRpc.Error)
     }
 
     /// A shared instance of `AppStorePaymentManager`
@@ -220,12 +216,12 @@ class AppStorePaymentManager {
         AnyPublisher<SendAppStoreReceiptResponse, AppStorePaymentManager.Error>
     {
         return AppStoreReceipt.fetch(forceRefresh: forceRefresh)
-            .mapError { SendAppStoreReceiptError.read($0) }
+            .mapError { .readReceipt($0) }
             .flatMap { (receiptData) in
                 self.rpc.sendAppStoreReceipt(
                     accountToken: accountToken,
                     receiptData: receiptData
-                ).mapError { SendAppStoreReceiptError.rpc($0) }
+                ).mapError { .sendReceipt($0) }
         }
         .receive(on: DispatchQueue.main)
         .handleEvents(receiveOutput: { (response) in
@@ -233,9 +229,7 @@ class AppStorePaymentManager {
                 .info,
                 "AppStore Receipt was processed. Time added: %{public}.2f, New expiry: %{private}s",
                 response.timeAdded, "\(response.newExpiry)")
-        })
-            .mapError { AppStorePaymentManager.Error.sendReceipt($0) }
-            .eraseToAnyPublisher()
+        }).eraseToAnyPublisher()
     }
 
     private func handleTransaction(_ transaction: SKPaymentTransaction) {
@@ -334,7 +328,7 @@ extension AppStorePaymentManager.Error: LocalizedError {
             return nil
         case .storePayment:
             return NSLocalizedString("AppStore payment", comment: "")
-        case .sendReceipt:
+        case .sendReceipt, .readReceipt:
             return NSLocalizedString("Communication error", comment: "")
         }
     }
@@ -343,11 +337,11 @@ extension AppStorePaymentManager.Error: LocalizedError {
         switch self {
         case .storePayment(let storeError):
             return storeError.localizedDescription
-        case .sendReceipt(.rpc(.network(let urlError))):
+        case .sendReceipt(.network(let urlError)):
             return urlError.localizedDescription
-        case .sendReceipt(.rpc(.server(let serverError))):
+        case .sendReceipt(.server(let serverError)):
             return serverError.errorDescription
-        case .sendReceipt(.read(.refresh(let storeError))):
+        case .readReceipt(.refresh(let storeError)):
             return storeError.localizedDescription
         default:
             return NSLocalizedString("Internal error", comment: "")
@@ -360,7 +354,7 @@ extension AppStorePaymentManager.Error: LocalizedError {
             return nil
         case .storePayment:
             return nil
-        case .sendReceipt:
+        case .sendReceipt, .readReceipt:
             return NSLocalizedString(
                 #"Please retry by using the "Restore purchases" button"#, comment: "")
         }

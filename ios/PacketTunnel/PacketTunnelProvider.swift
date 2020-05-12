@@ -12,7 +12,7 @@ import Network
 import NetworkExtension
 import os
 
-enum PacketTunnelProviderError: Error {
+enum PacketTunnelProviderError: ChainedError {
     /// Failure to read the relay cache
     case readRelayCache(RelayCacheError)
 
@@ -35,9 +35,9 @@ enum PacketTunnelProviderError: Error {
     case updateWireguardConfiguration(Error)
 
     /// IPC handler failure
-    case ipcHandler(PacketTunnelIpcHandlerError)
+    case ipcHandler(PacketTunnelIpcHandler.Error)
 
-    var localizedDescription: String {
+    var errorDescription: String? {
         switch self {
         case .readRelayCache(let relayError):
             return "Failure to read the relay cache: \(relayError.localizedDescription)"

@@ -15,6 +15,6 @@ enum AuthenticationMethod {
 enum LoginState {
     case `default`
     case authenticating(AuthenticationMethod)
-    case failure(AccountError)
+    case failure(Account.Error)
     case success(AuthenticationMethod)
 }

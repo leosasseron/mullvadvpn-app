@@ -20,7 +20,7 @@ class WireguardDevice {
     typealias WireguardLogHandler = (WireguardLogLevel, String) -> Void
 
     /// An error type describing the errors returned by `WireguardDevice`
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         /// A failure to obtain the tunnel device file descriptor
         case cannotLocateSocketDescriptor
 
@@ -36,7 +36,7 @@ class WireguardDevice {
         /// A failure to resolve an endpoint
         case resolveEndpoint(AnyIPEndpoint, Swift.Error)
 
-        var localizedDescription: String {
+        var errorDescription: String? {
             switch self {
             case .cannotLocateSocketDescriptor:
                 return "Unable to locate the file descriptor for socket."
@@ -46,8 +46,8 @@ class WireguardDevice {
                 return "Wireguard has not been started yet"
             case .alreadyStarted:
                 return "Wireguard has already been started"
-            case .resolveEndpoint(let endpoint, let error):
-                return "Failed to resolve the endpoint: \(endpoint). Error: \(error.localizedDescription)"
+            case .resolveEndpoint(let endpoint, _):
+                return "Failed to resolve the endpoint: \(endpoint)"
             }
         }
     }

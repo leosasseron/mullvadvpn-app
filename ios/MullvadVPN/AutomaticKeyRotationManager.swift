@@ -18,7 +18,7 @@ private let kRotationInterval = 4
 
 class AutomaticKeyRotationManager {
 
-    enum Error: Swift.Error {
+    enum Error: ChainedError {
         /// An RPC failure
         case rpc(MullvadRpc.Error)
 
@@ -28,14 +28,14 @@ class AutomaticKeyRotationManager {
         /// A failure to update tunnel configuration
         case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 
-        var localizedDescription: String {
+        var errorDescription: String? {
             switch self {
-            case .rpc(let error):
-                return "Rpc error: \(error.localizedDescription)"
-            case .readTunnelConfiguration(let error):
-                return "Read configuration error: \(error.localizedDescription)"
-            case .updateTunnelConfiguration(let error):
-                return "Update configuration error: \(error.localizedDescription)"
+            case .rpc:
+                return "RPC error"
+            case .readTunnelConfiguration:
+                return "Read configuration error"
+            case .updateTunnelConfiguration:
+                return "Update configuration error"
             }
         }
     }

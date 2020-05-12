@@ -12,9 +12,18 @@ import os
 
 private let kCellIdentifier = "Cell"
 
-enum SelectLocationControllerError: Error {
+enum SelectLocationControllerError: ChainedError {
     case loadRelayList(RelayCacheError)
     case getRelayConstraints(TunnelManagerError)
+
+    var errorDescription: String? {
+        switch self {
+        case .loadRelayList:
+            return "Failure to load a relay list"
+        case .getRelayConstraints:
+            return "Failure to retrieve relay constraints"
+        }
+    }
 }
 
 class SelectLocationController: UITableViewController {
