@@ -35,7 +35,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { (completion) in
                 if case .failure(let error) = completion {
-                    fatalError("Failed to restore the account: \(error.localizedDescription)")
+                    fatalError(error.displayChain(message: "Failed to load the tunnel for account"))
                 }
 
                 let rootViewController = self.mainStoryboard.instantiateViewController(identifier: ViewControllerIdentifier.root.rawValue) as! RootContainerViewController

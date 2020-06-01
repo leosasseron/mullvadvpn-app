@@ -49,7 +49,7 @@ class SimulatorTunnelProviderHost: SimulatorTunnelProviderDelegate {
     func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         PacketTunnelIpcHandler.decodeRequest(messageData: messageData)
             .receive(on: DispatchQueue.main)
-            .flatMap { (request) -> AnyPublisher<AnyEncodable, PacketTunnelIpcHandlerError> in
+            .flatMap { (request) -> AnyPublisher<AnyEncodable, PacketTunnelIpcHandler.Error> in
                 switch request {
                 case .reloadConfiguration:
                     return Result.Publisher(AnyEncodable(true))

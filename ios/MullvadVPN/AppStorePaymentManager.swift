@@ -295,8 +295,8 @@ class AppStorePaymentManager {
                     self.queue.finishTransaction(transaction)
 
                 case .failure(let error):
-                    os_log(.error, "Failed to upload the AppStore receipt: %{public}s",
-                           error.localizedDescription)
+                    os_log("%{public}s",
+                           error.displayChain(message: "Failed to upload the AppStore receipt"))
 
                     self.enumerateObservers { (observer) in
                         observer.appStorePaymentManager(
