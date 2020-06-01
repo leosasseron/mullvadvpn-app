@@ -41,6 +41,9 @@ class RelayCache {
     /// A queue used for execution
     private let executionQueue = DispatchQueue(label: "net.mullvad.vpn.relay-cache.execution-queue")
 
+    /// An operation queue used access synchronization
+    private let operationQueue = OperationQueue()
+
     /// The default cache file location
     static var defaultCacheFileURL: URL? {
         let appGroupIdentifier = ApplicationConfiguration.securityGroupIdentifier
@@ -158,6 +161,7 @@ class RelayCache {
 
     private func downloadRelays() -> AnyPublisher<RelayList, RelayCacheError> {
         rpc.getRelayList()
+            .publisher
             .mapError { .rpc($0) }
             .eraseToAnyPublisher()
     }

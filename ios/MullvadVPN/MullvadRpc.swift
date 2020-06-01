@@ -112,115 +112,68 @@ class MullvadRpc {
         self.session = session
     }
 
-    func createAccount() -> AnyPublisher<String, MullvadRpc.Error> {
+    func createAccount() -> MullvadRpc.Request<String> {
         let request = JsonRpcRequest(method: "create_account", params: [])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func getRelayList() -> AnyPublisher<RelayList, MullvadRpc.Error> {
+    func getRelayList() -> MullvadRpc.Request<RelayList> {
         let request = JsonRpcRequest(method: "relay_list_v3", params: [])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func getAccountExpiry(accountToken: String) -> AnyPublisher<Date, MullvadRpc.Error> {
+    func getAccountExpiry(accountToken: String) -> MullvadRpc.Request<Date> {
         let request = JsonRpcRequest(method: "get_expiry", params: [AnyEncodable(accountToken)])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func pushWireguardKey(accountToken: String, publicKey: Data) -> AnyPublisher<WireguardAssociatedAddresses, MullvadRpc.Error> {
+    func pushWireguardKey(accountToken: String, publicKey: Data) -> MullvadRpc.Request<WireguardAssociatedAddresses> {
         let request = JsonRpcRequest(method: "push_wg_key", params: [
             AnyEncodable(accountToken),
             AnyEncodable(publicKey)
         ])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func replaceWireguardKey(accountToken: String, oldPublicKey: Data, newPublicKey: Data) -> AnyPublisher<WireguardAssociatedAddresses, MullvadRpc.Error> {
+    func replaceWireguardKey(accountToken: String, oldPublicKey: Data, newPublicKey: Data) -> MullvadRpc.Request<WireguardAssociatedAddresses> {
         let request = JsonRpcRequest(method: "replace_wg_key", params: [
             AnyEncodable(accountToken),
             AnyEncodable(oldPublicKey),
             AnyEncodable(newPublicKey)
         ])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func checkWireguardKey(accountToken: String, publicKey: Data) -> AnyPublisher<Bool, MullvadRpc.Error> {
+    func checkWireguardKey(accountToken: String, publicKey: Data) -> MullvadRpc.Request<Bool> {
         let request = JsonRpcRequest(method: "check_wg_key", params: [
             AnyEncodable(accountToken),
             AnyEncodable(publicKey)
         ])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func removeWireguardKey(accountToken: String, publicKey: Data) -> AnyPublisher<Bool, MullvadRpc.Error> {
+    func removeWireguardKey(accountToken: String, publicKey: Data) -> MullvadRpc.Request<Bool> {
         let request = JsonRpcRequest(method: "remove_wg_key", params: [
             AnyEncodable(accountToken),
             AnyEncodable(publicKey)
         ])
 
-        return makeDataTaskPublisher(request: request)
+        return MullvadRpc.Request(session: session, request: request)
     }
 
-    func sendAppStoreReceipt(accountToken: String, receiptData: Data) -> AnyPublisher<SendAppStoreReceiptResponse, MullvadRpc.Error> {
+    func sendAppStoreReceipt(accountToken: String, receiptData: Data) -> MullvadRpc.Request<SendAppStoreReceiptResponse> {
         let request = JsonRpcRequest(method: "apple_payment", params: [
             AnyEncodable(accountToken),
             AnyEncodable(receiptData)
         ])
 
-        return makeDataTaskPublisher(request: request)
-    }
-
-    private func makeDataTaskPublisher<T: Decodable>(request: JsonRpcRequest) -> AnyPublisher<T, MullvadRpc.Error> {
-        return Just(request)
-            .encode(encoder: Self.makeJSONEncoder())
-            .mapError { MullvadRpc.Error.encoding($0) }
-            .map { Self.makeURLRequest(httpBody: $0) }
-            .flatMap {
-                self.session.dataTaskPublisher(for: $0)
-                    .mapError { MullvadRpc.Error.network($0) }
-                    .flatMap { (data, httpResponse) in
-                        Just(data)
-                            .decode(type: JsonRpcResponse<T, ResponseCode>.self, decoder: Self.makeJSONDecoder())
-                            .mapError { MullvadRpc.Error.decoding($0) }
-                            .flatMap { (serverResponse) in
-                                // unwrap JsonRpcResponse.result
-                                serverResponse.result
-                                    .mapError { MullvadRpc.Error.server($0) }
-                                    .publisher
-                            }
-                }
-        }.eraseToAnyPublisher()
-    }
-
-    private static func makeURLRequest(httpBody: Data) -> URLRequest {
-        var request = URLRequest(url: kMullvadAPIURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: kNetworkTimeout)
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpMethod = "POST"
-        request.httpBody = httpBody
-
-        return request
-    }
-
-    private static func makeJSONEncoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.dataEncodingStrategy = .base64
-        return encoder
-    }
-
-    private static func makeJSONDecoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
-        decoder.dataDecodingStrategy = .base64
-        return decoder
+        return MullvadRpc.Request(session: session, request: request)
     }
 }
 
@@ -249,6 +202,82 @@ extension JsonRpcResponseError: LocalizedError
 
         default:
             return nil
+        }
+    }
+}
+
+
+extension MullvadRpc {
+    class Request<Response> where Response: Decodable {
+        let session: URLSession
+        let request: JsonRpcRequest
+
+        init(session: URLSession, request: JsonRpcRequest) {
+            self.session = session
+            self.request = request
+        }
+
+        var publisher: AnyPublisher<Response, MullvadRpc.Error> {
+            return makeURLRequest().publisher
+                .flatMap { (urlRequest) in
+                    return self.session.dataTaskPublisher(for: urlRequest)
+                        .mapError { MullvadRpc.Error.network($0) }
+                        .flatMap { (data, httpResponse) in
+                            return self.decodeResponse(data).publisher
+                    }
+            }.eraseToAnyPublisher()
+        }
+
+        private func makeURLRequest() -> Result<URLRequest, MullvadRpc.Error> {
+            do {
+                let data = try Self.makeJSONEncoder().encode(request)
+
+                return .success(Self.makeURLRequest(httpBody: data))
+            } catch {
+                return .failure(.encoding(error))
+            }
+        }
+
+        private func decodeResponse(_ responseData: Data) -> Result<Response, MullvadRpc.Error> {
+            do {
+                let serverResponse = try Self.makeJSONDecoder()
+                    .decode(JsonRpcResponse<Response, MullvadRpc.ResponseCode>.self, from: responseData)
+
+                // unwrap JsonRpcResponse.result
+                return serverResponse.result
+                    .mapError { .server($0) }
+            } catch {
+                return .failure(.decoding(error))
+            }
+        }
+
+        fileprivate static func makeURLRequest(httpBody: Data) -> URLRequest {
+            var request = URLRequest(
+                url: kMullvadAPIURL,
+                cachePolicy: .useProtocolCachePolicy,
+                timeoutInterval: kNetworkTimeout
+            )
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpMethod = "POST"
+            request.httpBody = httpBody
+
+            return request
+        }
+
+        private static func makeJSONEncoder() -> JSONEncoder {
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.dataEncodingStrategy = .base64
+            return encoder
+        }
+
+        private static func makeJSONDecoder() -> JSONDecoder {
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            decoder.dateDecodingStrategy = .iso8601
+            decoder.dataDecodingStrategy = .base64
+            return decoder
         }
     }
 }
