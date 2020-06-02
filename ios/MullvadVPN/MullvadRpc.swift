@@ -209,10 +209,12 @@ extension JsonRpcResponseError: LocalizedError
 
 extension MullvadRpc {
     class Request<Response> where Response: Decodable {
-        let session: URLSession
-        let request: JsonRpcRequest
+        typealias DataTaskCompletionHandler = (Result<Response, MullvadRpc.Error>) -> Void
 
-        init(session: URLSession, request: JsonRpcRequest) {
+        private let session: URLSession
+        private let request: JsonRpcRequest
+
+        fileprivate init(session: URLSession, request: JsonRpcRequest) {
             self.session = session
             self.request = request
         }
@@ -223,9 +225,32 @@ extension MullvadRpc {
                     return self.session.dataTaskPublisher(for: urlRequest)
                         .mapError { MullvadRpc.Error.network($0) }
                         .flatMap { (data, httpResponse) in
-                            return self.decodeResponse(data).publisher
+                            return Self.decodeResponse(data).publisher
                     }
             }.eraseToAnyPublisher()
+        }
+
+        func dataTask(completionHandler: @escaping DataTaskCompletionHandler) -> URLSessionDataTask?
+        {
+            switch makeURLRequest() {
+            case .success(let urlRequest):
+                return session.dataTask(with: urlRequest) { (responseData, urlResponse, error) in
+                    switch (responseData, error) {
+                    case (.some(let data), .none):
+                        completionHandler(Self.decodeResponse(data))
+
+                    case (.none, .some(let urlError as URLError)):
+                        completionHandler(.failure(.network(urlError)))
+
+                    default:
+                        fatalError()
+                    }
+                }
+            case .failure(let error):
+                completionHandler(.failure(error))
+
+                return nil
+            }
         }
 
         private func makeURLRequest() -> Result<URLRequest, MullvadRpc.Error> {
@@ -238,7 +263,7 @@ extension MullvadRpc {
             }
         }
 
-        private func decodeResponse(_ responseData: Data) -> Result<Response, MullvadRpc.Error> {
+        private static func decodeResponse(_ responseData: Data) -> Result<Response, MullvadRpc.Error> {
             do {
                 let serverResponse = try Self.makeJSONDecoder()
                     .decode(JsonRpcResponse<Response, MullvadRpc.ResponseCode>.self, from: responseData)
@@ -251,7 +276,7 @@ extension MullvadRpc {
             }
         }
 
-        fileprivate static func makeURLRequest(httpBody: Data) -> URLRequest {
+        private static func makeURLRequest(httpBody: Data) -> URLRequest {
             var request = URLRequest(
                 url: kMullvadAPIURL,
                 cachePolicy: .useProtocolCachePolicy,

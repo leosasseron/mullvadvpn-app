@@ -22,6 +22,8 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
     private var startStopTunnelSubscriber: AnyCancellable?
     private var tunnelStateSubscriber: AnyCancellable?
 
+    private let alertPresenter = AlertPresenter()
+
     override var preferredStatusBarStyle: UIStatusBarStyle {
         return .lightContent
     }
@@ -136,7 +138,9 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
                     os_log(.error, "Failed to start the tunnel: %{public}s",
                            error.localizedDescription)
 
-                    self.presentError(error, preferredStyle: .alert)
+                    let presentation = TunnelErrorPresentation(context: .startTunnel, cause: error)
+
+                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                 }
             })
     }
@@ -149,7 +153,9 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
                     os_log(.error, "Failed to stop the tunnel: %{public}s",
                            error.localizedDescription)
 
-                    self.presentError(error, preferredStyle: .alert)
+                    let presentation = TunnelErrorPresentation(context: .stopTunnel, cause: error)
+                    
+                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                 }
             })
     }

@@ -24,33 +24,6 @@ private enum WireguardKeysViewState {
     case regeneratingKey
 }
 
-private struct VerifyWireguardPublicKeyError: Error {
-    var underlyingError: MullvadRpc.Error
-
-    init(_ error: MullvadRpc.Error) {
-        self.underlyingError = error
-    }
-}
-
-extension VerifyWireguardPublicKeyError: LocalizedError {
-    var errorDescription: String? {
-        return NSLocalizedString("Cannot verify the public key", comment: "")
-    }
-
-    var failureReason: String? {
-        switch underlyingError {
-        case .network(let urlError):
-            return urlError.localizedDescription
-
-        case .server(let serverError):
-            return serverError.errorDescription
-
-        case .decoding, .encoding:
-            return NSLocalizedString("Internal error", comment: "")
-        }
-    }
-}
-
 class WireguardKeysViewController: UIViewController {
 
     @IBOutlet var publicKeyButton: UIButton!
@@ -65,6 +38,8 @@ class WireguardKeysViewController: UIViewController {
     private var regenerateKeySubscriber: AnyCancellable?
     private var creationDateTimerSubscriber: AnyCancellable?
     private var copyToPasteboardSubscriber: AnyCancellable?
+
+    private let alertPresenter = AlertPresenter()
 
     private let rpc = MullvadRpc.withEphemeralURLSession()
 
@@ -187,10 +162,9 @@ class WireguardKeysViewController: UIViewController {
         verifyKeySubscriber = rpc.checkWireguardKey(
             accountToken: accountToken,
             publicKey: publicKey.rawRepresentation
-        )
+            ).publisher
             .retry(1)
             .receive(on: DispatchQueue.main)
-            .mapError { VerifyWireguardPublicKeyError($0) }
             .handleEvents(receiveSubscription: { _ in
                 self.updateViewState(.verifyingKey)
             })
@@ -200,7 +174,9 @@ class WireguardKeysViewController: UIViewController {
                     break
 
                 case .failure(let error):
-                    self.presentError(error, preferredStyle: .alert)
+                    let presentation = RpcErrorPresentation(context: .verifyKey, cause: error)
+
+                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                     self.updateViewState(.default)
                 }
             }) { (isValid) in
@@ -222,10 +198,12 @@ class WireguardKeysViewController: UIViewController {
                     break
 
                 case .failure(let error):
+                    let presentation = TunnelErrorPresentation(context: .regenerateKey, cause: error)
+
                     os_log(.error, "Failed to re-generate the private key: %{public}s",
                            error.errorDescription ?? "")
 
-                    self.presentError(error, preferredStyle: .alert)
+                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                 }
         }
     }

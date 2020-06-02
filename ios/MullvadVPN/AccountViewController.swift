@@ -230,7 +230,7 @@ class AccountViewController: UIViewController {
                     switch completion {
                     case .failure(let error):
                         alertController.dismiss(animated: true) {
-                            self.presentError(error, preferredStyle: .alert)
+//                            self.presentError(error, preferredStyle: .alert)
                         }
 
                     case .finished:
@@ -278,7 +278,7 @@ class AccountViewController: UIViewController {
             .restrictUserInterfaceInteraction(with: compoundInteractionRestriction, animated: true)
             .sink(receiveCompletion: { [weak self] (completion) in
                 if case .failure(let error) = completion {
-                    self?.presentError(error, preferredStyle: .alert)
+//                    self?.presentError(error, preferredStyle: .alert)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .purchase)
@@ -292,7 +292,7 @@ class AccountViewController: UIViewController {
             .restrictUserInterfaceInteraction(with: compoundInteractionRestriction, animated: true)
             .sink(receiveCompletion: { [weak self] (completion) in
                 if case .failure(let error) = completion {
-                    self?.presentError(error, preferredStyle: .alert)
+//                    self?.presentError(error, preferredStyle: .alert)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .restoration)

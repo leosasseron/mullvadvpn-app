@@ -37,74 +37,8 @@ enum TunnelManagerError: ChainedError {
     /// A failure to get the relay constraints
     case getRelayConstraints(TunnelConfigurationManager.Error)
 
-    /// A failure to get a public key used for Wireguard
-    case getWireguardPublicKey(TunnelConfigurationManager.Error)
-
     /// A failure to re-generate a private key used for Wireguard
     case regenerateWireguardPrivateKey(RegenerateWireguardPrivateKeyError)
-}
-
-extension TunnelManagerError: LocalizedError {
-
-    var errorDescription: String? {
-        switch self {
-        case .regenerateWireguardPrivateKey:
-            return NSLocalizedString("Cannot regenerate the private key", comment: "")
-
-        case .setAccount:
-            return NSLocalizedString("Cannot set up the tunnel", comment: "")
-
-        case .getWireguardPublicKey:
-            return NSLocalizedString("Cannot retrieve the public key", comment: "")
-
-        case .startTunnel:
-            return NSLocalizedString("Cannot start the tunnel", comment: "")
-
-        case .stopTunnel:
-            return NSLocalizedString("Cannot stop the tunnel", comment: "")
-
-        default:
-            return nil
-        }
-    }
-
-    var failureReason: String? {
-        switch self {
-
-        case .setAccount(.pushWireguardKey(let pushError)),
-             .regenerateWireguardPrivateKey(.replaceWireguardKey(let pushError)):
-            switch pushError {
-            case .network(let urlError):
-                return urlError.localizedDescription
-
-            case .server(let serverError):
-                return serverError.errorDescription
-
-            default:
-                return NSLocalizedString("Internal error", comment: "")
-            }
-
-        default:
-            return nil
-        }
-    }
-
-    var recoverySuggestion: String? {
-        switch self {
-        case .regenerateWireguardPrivateKey(.replaceWireguardKey(let pushError)):
-            switch pushError {
-            case .server(let serverError) where serverError.code == .tooManyWireguardKeys:
-                return NSLocalizedString("Remove unused WireGuard keys and try again.", comment: "")
-
-            default:
-                return nil
-            }
-
-        default:
-            return nil
-        }
-    }
-
 }
 
 enum TunnelIpcRequestError: ChainedError {
@@ -446,7 +380,7 @@ class TunnelManager {
                     return self.rpc.pushWireguardKey(
                         accountToken: accountToken,
                         publicKey: publicKey.rawRepresentation
-                    )
+                    ).publisher
                         .mapError { SetAccountError.pushWireguardKey($0) }
                         .flatMap { (addresses) in
                             self.updateAssociatedAddresses(
@@ -489,7 +423,7 @@ class TunnelManager {
                                     self.rpc.removeWireguardKey(
                                         accountToken: accountToken,
                                         publicKey: publicKey
-                                    )
+                                    ).publisher
                                         .retry(1)
                                         .map({ (isRemoved) -> () in
                                             os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
@@ -575,6 +509,7 @@ class TunnelManager {
                                 accountToken: accountToken,
                                 oldPublicKey: oldPublicKey.rawRepresentation,
                                 newPublicKey: newPrivateKey.publicKey.rawRepresentation)
+                                .publisher
                                 .mapError { RegenerateWireguardPrivateKeyError.replaceWireguardKey($0) }
                                 .receive(on: self.executionQueue)
                                 .flatMap { (addresses) in

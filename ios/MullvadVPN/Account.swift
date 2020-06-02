@@ -69,6 +69,7 @@ class Account {
 
     func loginWithNewAccount() -> AnyPublisher<String, Error> {
         return rpc.createAccount()
+            .publisher
             .mapError { .rpc($0) }
             .flatMap { (newAccountToken) in
                 TunnelManager.shared.setAccount(accountToken: newAccountToken)
@@ -87,6 +88,7 @@ class Account {
     /// application preferences.
     func login(with accountToken: String) -> AnyPublisher<(), Error> {
         return rpc.getAccountExpiry(accountToken: accountToken)
+            .publisher
             .mapError { .rpc($0) }
             .flatMap { (expiry) in
                 TunnelManager.shared.setAccount(accountToken: accountToken)

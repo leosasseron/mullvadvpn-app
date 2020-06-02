@@ -193,16 +193,17 @@ class AutomaticKeyRotationManager {
                 }
         }.eraseToAnyPublisher()
     }
-
+    
     private func replaceWireguardKey(accountToken: String, oldPublicKey: WireguardPublicKey)
         -> AnyPublisher<TunnelConfiguration, Error>
     {
         let newPrivateKey = WireguardPrivateKey()
-
+        
         return rpc.replaceWireguardKey(
             accountToken: accountToken,
             oldPublicKey: oldPublicKey.rawRepresentation,
             newPublicKey: newPrivateKey.publicKey.rawRepresentation)
+            .publisher
             .mapError {  .rpc($0) }
             .flatMap { (addresses) in
                 TunnelConfigurationManager

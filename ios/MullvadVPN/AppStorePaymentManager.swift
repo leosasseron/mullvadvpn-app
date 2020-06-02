@@ -221,7 +221,7 @@ class AppStorePaymentManager {
                 self.rpc.sendAppStoreReceipt(
                     accountToken: accountToken,
                     receiptData: receiptData
-                ).mapError { .sendReceipt($0) }
+                    ).publisher.mapError { .sendReceipt($0) }
         }
         .receive(on: DispatchQueue.main)
         .handleEvents(receiveOutput: { (response) in
@@ -317,46 +317,4 @@ class AppStorePaymentManager {
             })
     }
 
-}
-
-
-extension AppStorePaymentManager.Error: LocalizedError {
-
-    var errorDescription: String? {
-        switch self {
-        case .noAccountSet:
-            return nil
-        case .storePayment:
-            return NSLocalizedString("AppStore payment", comment: "")
-        case .sendReceipt, .readReceipt:
-            return NSLocalizedString("Communication error", comment: "")
-        }
-    }
-
-    var failureReason: String? {
-        switch self {
-        case .storePayment(let storeError):
-            return storeError.localizedDescription
-        case .sendReceipt(.network(let urlError)):
-            return urlError.localizedDescription
-        case .sendReceipt(.server(let serverError)):
-            return serverError.errorDescription
-        case .readReceipt(.refresh(let storeError)):
-            return storeError.localizedDescription
-        default:
-            return NSLocalizedString("Internal error", comment: "")
-        }
-    }
-
-    var recoverySuggestion: String? {
-        switch self {
-        case .noAccountSet:
-            return nil
-        case .storePayment:
-            return nil
-        case .sendReceipt, .readReceipt:
-            return NSLocalizedString(
-                #"Please retry by using the "Restore purchases" button"#, comment: "")
-        }
-    }
 }
