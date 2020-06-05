@@ -6,14 +6,13 @@
 //  Copyright © 2019 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
 import Foundation
 import NetworkExtension
 
 /// A enum describing the kinds of requests that `PacketTunnelProvider` handles
 enum PacketTunnelRequest: Int, Codable {
-    /// Request the tunnel to reload the configuration
-    case reloadConfiguration
+    /// Request the tunnel to reload settings
+    case reloadTunnelSettings
 
     /// Request the tunnel to return the connection information
     case tunnelInformation
@@ -51,21 +50,26 @@ extension PacketTunnelIpcHandler {
         case processing(Swift.Error)
     }
 
+    static func decodeRequest(messageData: Data) -> Result<PacketTunnelRequest, Error> {
+        do {
+            let decoder = JSONDecoder()
+            let value = try decoder.decode(PacketTunnelRequest.self, from: messageData)
 
-    static func decodeRequest(messageData: Data) -> AnyPublisher<PacketTunnelRequest, Error> {
-        return Just(messageData)
-            .setFailureType(to: Error.self)
-            .decode(type: PacketTunnelRequest.self, decoder: JSONDecoder())
-            .mapError { .decoding($0) }
-            .eraseToAnyPublisher()
+            return .success(value)
+        } catch {
+            return .failure(.decoding(error))
+        }
     }
 
-    static func encodeResponse<T>(response: T) -> AnyPublisher<Data, Error> where T: Encodable {
-        return Just(response)
-            .setFailureType(to: Error.self)
-            .encode(encoder: JSONEncoder())
-            .mapError { .encoding($0) }
-            .eraseToAnyPublisher()
+    static func encodeResponse<T>(response: T) -> Result<Data, Error> where T: Encodable {
+        do {
+            let encoder = JSONEncoder()
+            let value = try encoder.encode(response)
+
+            return .success(value)
+        } catch {
+            return .failure(.encoding(error))
+        }
     }
 }
 
@@ -105,46 +109,79 @@ class PacketTunnelIpc {
         self.session = session
     }
 
-    func reloadConfiguration() -> AnyPublisher<(), Error> {
-        return send(message: .reloadConfiguration)
+    func reloadTunnelSettings(completionHandler: @escaping (Result<(), Error>) -> Void) {
+        send(message: .reloadTunnelSettings, completionHandler: completionHandler)
     }
 
-    func getTunnelInformation() -> AnyPublisher<TunnelConnectionInfo, Error> {
-        return send(message: .tunnelInformation)
+    func getTunnelInformation(completionHandler: @escaping (Result<TunnelConnectionInfo, Error>) -> Void) {
+        send(message: .tunnelInformation, completionHandler: completionHandler)
     }
 
-    private func send(message: PacketTunnelRequest) -> AnyPublisher<(), Error> {
-        return sendWithoutDecoding(message: message)
-            .map { _ in () }.eraseToAnyPublisher()
+    private class func encodeRequest(message: PacketTunnelRequest) -> Result<Data, Error> {
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(message)
+
+            return .success(data)
+        } catch {
+            return .failure(.encoding(error))
+        }
     }
 
-    private func send<T>(message: PacketTunnelRequest) -> AnyPublisher<T, Error> where T: Decodable {
-        return sendWithoutDecoding(message: message)
-            .replaceNil(with: .nilResponse)
-            .decode(type: T.self, decoder: JSONDecoder())
-            .mapError { Error.decoding($0) }
-            .eraseToAnyPublisher()
+    private class func decodeResponse<T>(data: Data) -> Result<T, Error> where T: Decodable {
+        do {
+            let decoder = JSONDecoder()
+            let value = try decoder.decode(T.self, from: data)
+
+            return .success(value)
+        } catch {
+            return .failure(.decoding(error))
+        }
     }
 
-    private func sendWithoutDecoding(message: PacketTunnelRequest) -> AnyPublisher<Data?, Error> {
-        return Just(message)
-            .setFailureType(to: Error.self)
-            .encode(encoder: JSONEncoder())
-            .mapError { Error.encoding($0) }
-            .flatMap(self.sendProviderMessage)
-            .mapError { .send($0) }
-            .eraseToAnyPublisher()
+    private func send(message: PacketTunnelRequest, completionHandler: @escaping (Result<(), Error>) -> Void) {
+        sendWithoutDecoding(message: message) { (result) in
+            let result = result.map { _ in () }
+
+            completionHandler(result)
+        }
     }
 
-    private func sendProviderMessage(_ messageData: Data) -> Future<Data?, Swift.Error> {
-        return Future { (fulfill) in
-            do {
-                try self.session.sendProviderMessage(messageData, responseHandler: { (response) in
-                    fulfill(.success(response))
-                })
-            } catch {
-                fulfill(.failure(error))
+    private func send<T>(message: PacketTunnelRequest, completionHandler: @escaping (Result<T, Error>) -> Void)
+        where T: Decodable
+    {
+        sendWithoutDecoding(message: message) { (result) in
+            let result = result.flatMap { (data) -> Result<T, Error> in
+                if let data = data {
+                    return Self.decodeResponse(data: data)
+                } else {
+                    return .failure(.nilResponse)
+                }
             }
+
+            completionHandler(result)
+        }
+    }
+
+    private func sendWithoutDecoding(message: PacketTunnelRequest, completionHandler: @escaping (Result<Data?, Error>) -> Void) {
+        switch Self.encodeRequest(message: message) {
+        case .success(let data):
+            self.sendProviderMessage(data) { (result) in
+                completionHandler(result)
+            }
+
+        case .failure(let error):
+            completionHandler(.failure(error))
+        }
+    }
+
+    private func sendProviderMessage(_ messageData: Data, completionHandler: @escaping (Result<Data?, Error>) -> Void) {
+        do {
+            try self.session.sendProviderMessage(messageData, responseHandler: { (response) in
+                completionHandler(.success(response))
+            })
+        } catch {
+            completionHandler(.failure(.send(error)))
         }
     }
 

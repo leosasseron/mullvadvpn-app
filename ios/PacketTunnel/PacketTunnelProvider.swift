@@ -146,6 +146,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
         PacketTunnelIpcHandler.decodeRequest(messageData: messageData)
+            .publisher
             .mapError { PacketTunnelProviderError.ipcHandler($0) }
             .receive(on: executionQueue)
             .flatMap { (request) -> AnyPublisher<AnyEncodable, PacketTunnelProviderError> in
@@ -153,7 +154,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 switch request {
 
-                case .reloadConfiguration:
+                case .reloadTunnelSettings:
                     return self.reloadTunnel()
                         .map { AnyEncodable(true) }
                         .eraseToAnyPublisher()
@@ -166,6 +167,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }.flatMap({ (response) in
             return PacketTunnelIpcHandler.encodeResponse(response: response)
                 .mapError { PacketTunnelProviderError.ipcHandler($0) }
+                .publisher
         }).autoDisposableSink(cancellableSet: cancellableSet, receiveCompletion: { (completion) in
             if case .failure(let error) = completion {
                 os_log(.error, log: tunnelProviderLog,

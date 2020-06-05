@@ -51,7 +51,7 @@ class SimulatorTunnelProviderHost: SimulatorTunnelProviderDelegate {
             .receive(on: DispatchQueue.main)
             .flatMap { (request) -> AnyPublisher<AnyEncodable, PacketTunnelIpcHandler.Error> in
                 switch request {
-                case .reloadConfiguration:
+                case .reloadTunnelSettings:
                     return Result.Publisher(AnyEncodable(true))
                         .eraseToAnyPublisher()
 

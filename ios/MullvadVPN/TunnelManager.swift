@@ -570,18 +570,18 @@ class TunnelManager {
 
     /// Tell Packet Tunnel process to reload the tunnel configuration
     private func reloadPacketTunnelConfiguration() -> AnyPublisher<(), TunnelIpcRequestError> {
-        return executeIpcRequest { $0.reloadConfiguration() }
+        return executeIpcRequest { Future($0.reloadTunnelSettings) }
     }
 
     /// Ask Packet Tunnel process to return the current tunnel connection info
     private func getTunnelConnectionInfo() -> AnyPublisher<TunnelConnectionInfo, TunnelIpcRequestError> {
-        return executeIpcRequest { $0.getTunnelInformation() }
+        return executeIpcRequest { Future($0.getTunnelInformation) }
     }
 
     /// IPC interactor helper that automatically maps the `PacketTunnelIpcError` to
     /// `TunnelIpcRequestError`
     private func executeIpcRequest<T>(
-        _ body: @escaping (PacketTunnelIpc) -> AnyPublisher<T, PacketTunnelIpc.Error>
+        _ body: @escaping (PacketTunnelIpc) -> Future<T, PacketTunnelIpc.Error>
     ) -> AnyPublisher<T, TunnelIpcRequestError>
     {
         Just(tunnelIpc)
