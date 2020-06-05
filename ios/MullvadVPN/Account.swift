@@ -23,11 +23,14 @@ private enum UserDefaultsKeys: String {
 class Account {
 
     enum Error: ChainedError {
-        /// A failure to complete an RPC request
-        case rpc(MullvadRpc.Error)
+        /// A failure to create the new account token
+        case createAccount(MullvadRpc.Error)
+
+        /// A failure to verify the account token
+        case verifyAccount(MullvadRpc.Error)
 
         /// A failure to configure a tunnel
-        case tunnelConfiguration(TunnelManagerError)
+        case tunnelConfiguration(TunnelManager.Error)
     }
 
     /// A notification name used to broadcast the changes to account expiry
@@ -70,7 +73,7 @@ class Account {
     func loginWithNewAccount() -> AnyPublisher<String, Error> {
         return rpc.createAccount()
             .publisher
-            .mapError { .rpc($0) }
+            .mapError { .createAccount($0) }
             .flatMap { (newAccountToken) in
                 TunnelManager.shared.setAccount(accountToken: newAccountToken)
                     .mapError { .tunnelConfiguration($0) }
@@ -89,7 +92,7 @@ class Account {
     func login(with accountToken: String) -> AnyPublisher<(), Error> {
         return rpc.getAccountExpiry(accountToken: accountToken)
             .publisher
-            .mapError { .rpc($0) }
+            .mapError { .verifyAccount($0) }
             .flatMap { (expiry) in
                 TunnelManager.shared.setAccount(accountToken: accountToken)
                     .mapError { .tunnelConfiguration($0) }

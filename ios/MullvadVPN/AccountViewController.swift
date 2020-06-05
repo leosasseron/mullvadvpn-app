@@ -27,6 +27,8 @@ class AccountViewController: UIViewController {
     private var purchaseSubscriber: AnyCancellable?
     private var restorePurchasesSubscriber: AnyCancellable?
 
+    private let alertPresenter = AlertPresenter()
+
     private lazy var purchaseButtonInteractionRestriction =
         UserInterfaceInteractionRestriction(scheduler: DispatchQueue.main) {
             [weak self] (enableUserInteraction, _) in
@@ -230,7 +232,9 @@ class AccountViewController: UIViewController {
                     switch completion {
                     case .failure(let error):
                         alertController.dismiss(animated: true) {
-//                            self.presentError(error, preferredStyle: .alert)
+                            let errorPresentation = AccountErrorPresentation(context: .logout, cause: error)
+
+                            self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
                         }
 
                     case .finished:
@@ -277,8 +281,12 @@ class AccountViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .restrictUserInterfaceInteraction(with: compoundInteractionRestriction, animated: true)
             .sink(receiveCompletion: { [weak self] (completion) in
+                guard let self = self else { return }
+
                 if case .failure(let error) = completion {
-//                    self?.presentError(error, preferredStyle: .alert)
+                    let errorPresentation = AppStorePaymentErrorPresentation(context: .purchase, cause: error)
+
+                    self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .purchase)
@@ -291,8 +299,12 @@ class AccountViewController: UIViewController {
             .receive(on: DispatchQueue.main)
             .restrictUserInterfaceInteraction(with: compoundInteractionRestriction, animated: true)
             .sink(receiveCompletion: { [weak self] (completion) in
+                guard let self = self else { return }
+
                 if case .failure(let error) = completion {
-//                    self?.presentError(error, preferredStyle: .alert)
+                    let errorPresentation = AppStorePaymentErrorPresentation(context: .restorePurchases, cause: error)
+
+                    self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .restoration)

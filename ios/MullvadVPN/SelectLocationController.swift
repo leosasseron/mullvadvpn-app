@@ -14,7 +14,7 @@ private let kCellIdentifier = "Cell"
 
 enum SelectLocationControllerError: ChainedError {
     case loadRelayList(RelayCacheError)
-    case getRelayConstraints(TunnelManagerError)
+    case getRelayConstraints(TunnelManager.Error)
 
     var errorDescription: String? {
         switch self {

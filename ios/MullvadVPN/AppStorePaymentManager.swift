@@ -88,6 +88,19 @@ class AppStorePaymentManager {
         case storePayment(Swift.Error)
         case readReceipt(AppStoreReceipt.Error)
         case sendReceipt(MullvadRpc.Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .noAccountSet:
+                return "Account is not set"
+            case .storePayment:
+                return "Store payment error"
+            case .readReceipt:
+                return "Read recept error"
+            case .sendReceipt:
+                return "Send receipt error"
+            }
+        }
     }
 
     /// A shared instance of `AppStorePaymentManager`

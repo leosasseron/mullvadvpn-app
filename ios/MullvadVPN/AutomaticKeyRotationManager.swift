@@ -23,19 +23,19 @@ class AutomaticKeyRotationManager {
         case rpc(MullvadRpc.Error)
 
         /// A failure to read the tunnel configuration
-        case readTunnelConfiguration(TunnelConfigurationManager.Error)
+        case readTunnelSettings(TunnelSettingsManager.Error)
 
         /// A failure to update tunnel configuration
-        case updateTunnelConfiguration(TunnelConfigurationManager.Error)
+        case updateTunnelSettings(TunnelSettingsManager.Error)
 
         var errorDescription: String? {
             switch self {
             case .rpc:
                 return "RPC error"
-            case .readTunnelConfiguration:
-                return "Read configuration error"
-            case .updateTunnelConfiguration:
-                return "Update configuration error"
+            case .readTunnelSettings:
+                return "Read tunnel settings error"
+            case .updateTunnelSettings:
+                return "Update tunnel settings error"
             }
         }
     }
@@ -162,9 +162,9 @@ class AutomaticKeyRotationManager {
     }
 
     private func tryRotatingPrivateKey() -> AnyPublisher<KeyRotationEvent, Error> {
-        return TunnelConfigurationManager
+        return TunnelSettingsManager
             .load(searchTerm: .persistentReference(persistentKeychainReference))
-            .mapError { .readTunnelConfiguration($0) }
+            .mapError { .readTunnelSettings($0) }
             .publisher
             .flatMap { (keychainEntry) -> AnyPublisher<KeyRotationEvent, Error> in
                 let currentPrivateKey = keychainEntry.tunnelConfiguration.interface.privateKey
@@ -195,7 +195,7 @@ class AutomaticKeyRotationManager {
     }
     
     private func replaceWireguardKey(accountToken: String, oldPublicKey: WireguardPublicKey)
-        -> AnyPublisher<TunnelConfiguration, Error>
+        -> AnyPublisher<TunnelSettings, Error>
     {
         let newPrivateKey = WireguardPrivateKey()
         
@@ -206,7 +206,7 @@ class AutomaticKeyRotationManager {
             .publisher
             .mapError {  .rpc($0) }
             .flatMap { (addresses) in
-                TunnelConfigurationManager
+                TunnelSettingsManager
                     .update(searchTerm: .persistentReference(self.persistentKeychainReference))
                     { (tunnelConfiguration) in
                         tunnelConfiguration.interface.privateKey = newPrivateKey
@@ -215,7 +215,7 @@ class AutomaticKeyRotationManager {
                             addresses.ipv6Address
                         ]
                 }
-                .mapError { .updateTunnelConfiguration($0) }
+                .mapError { .updateTunnelSettings($0) }
                 .publisher
         }.eraseToAnyPublisher()
     }

@@ -23,7 +23,7 @@ enum PacketTunnelProviderError: ChainedError {
     case missingKeychainConfigurationReference
 
     /// Failure to read the tunnel configuration from Keychain
-    case cannotReadTunnelConfiguration(TunnelConfigurationManager.Error)
+    case cannotReadTunnelConfiguration(TunnelSettingsManager.Error)
 
     /// Failure to set network settings
     case setNetworkSettings(Error)
@@ -68,7 +68,7 @@ enum PacketTunnelProviderError: ChainedError {
 
 struct PacketTunnelConfiguration {
     var persistentKeychainReference: Data
-    var tunnelConfig: TunnelConfiguration
+    var tunnelConfig: TunnelSettings
     var selectorResult: RelaySelectorResult
 }
 
@@ -391,8 +391,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     /// Read tunnel configuration from Keychain
-    private class func readTunnelConfiguration(keychainReference: Data) -> Result<TunnelConfiguration, PacketTunnelProviderError> {
-        TunnelConfigurationManager.load(searchTerm: .persistentReference(keychainReference))
+    private class func readTunnelConfiguration(keychainReference: Data) -> Result<TunnelSettings, PacketTunnelProviderError> {
+        TunnelSettingsManager.load(searchTerm: .persistentReference(keychainReference))
             .mapError { PacketTunnelProviderError.cannotReadTunnelConfiguration($0) }
             .map { $0.tunnelConfiguration }
     }

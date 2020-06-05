@@ -1,5 +1,5 @@
 //
-//  RpcErrorPresentation.swift
+//  VerifyWireguardKeyErrorPresentation.swift
 //  MullvadVPN
 //
 //  Created by pronebird on 04/06/2020.
@@ -9,13 +9,9 @@
 import Foundation
 import UIKit
 
-struct RpcErrorPresentation: ErrorPresentation {
+struct VerifyWireguardKeyErrorPresentation: ErrorPresentation {
 
-    enum Context {
-        case verifyKey
-    }
-
-    var context: Context
+    var context: Void
     var cause: MullvadRpc.Error
 
     var title: String? {
@@ -30,8 +26,11 @@ struct RpcErrorPresentation: ErrorPresentation {
         case .server(let serverError):
             return serverError.errorDescription
 
-        case .decoding, .encoding:
-            return NSLocalizedString("Internal error", comment: "")
+        case .encoding:
+            return NSLocalizedString("Server request encoding error", comment: "")
+
+        case .decoding:
+            return NSLocalizedString("Server response decoding error", comment: "")
         }
     }
 

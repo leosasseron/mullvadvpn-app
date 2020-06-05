@@ -135,8 +135,8 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { (completion) in
                 if case .failure(let error) = completion {
-                    os_log(.error, "Failed to start the tunnel: %{public}s",
-                           error.localizedDescription)
+                    os_log(.error, "%{public}s",
+                           error.displayChain(message: "Failed to start the VPN tunnel"))
 
                     let presentation = TunnelErrorPresentation(context: .startTunnel, cause: error)
 
@@ -150,8 +150,7 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { (completion) in
                 if case .failure(let error) = completion {
-                    os_log(.error, "Failed to stop the tunnel: %{public}s",
-                           error.localizedDescription)
+                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to stop the VPN tunnel"))
 
                     let presentation = TunnelErrorPresentation(context: .stopTunnel, cause: error)
                     

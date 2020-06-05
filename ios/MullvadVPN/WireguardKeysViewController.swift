@@ -174,7 +174,7 @@ class WireguardKeysViewController: UIViewController {
                     break
 
                 case .failure(let error):
-                    let presentation = RpcErrorPresentation(context: .verifyKey, cause: error)
+                    let presentation = VerifyWireguardKeyErrorPresentation(cause: error)
 
                     self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                     self.updateViewState(.default)

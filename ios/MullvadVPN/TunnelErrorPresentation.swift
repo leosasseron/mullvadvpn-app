@@ -19,76 +19,74 @@ struct TunnelErrorPresentation: ErrorPresentation {
     }
 
     var context: Context
-    var cause: TunnelManagerError
+    var cause: TunnelManager.Error
 
     var title: String? {
         switch context {
         case .startTunnel:
-            return NSLocalizedString("Cannot start tunnel", comment: "")
+            return NSLocalizedString("Cannot start the tunnel", comment: "")
 
         case .stopTunnel:
-            return NSLocalizedString("Cannot stop tunnel", comment: "")
+            return NSLocalizedString("Cannot stop the tunnel", comment: "")
 
         case .regenerateKey:
-            return NSLocalizedString("Cannot regenerate key", comment: "")
+            return NSLocalizedString("Cannot regenerate the key", comment: "")
         }
     }
 
     var message: String? {
         switch cause {
-        case .startTunnel(let error):
-            switch error {
-            case .system(let systemError):
-                return String(format: NSLocalizedString("System error: %@", comment: ""), systemError.localizedDescription)
-            case .setup(let setupError):
-                switch setupError {
-                case .loadTunnels(let systemError):
-                    return String(format: NSLocalizedString("Failure to load system VPN configurations: %@", comment: ""), systemError.localizedDescription)
+        case .loadAllVPNConfigurations(let systemError):
+            return String(format: NSLocalizedString("Failed to load system VPN configurations: %@", comment: ""), systemError.localizedDescription)
 
-                case .reloadTunnel(let systemError):
-                    return String(format: NSLocalizedString("Failure to reload a VPN configuration: %@", comment: ""), systemError.localizedDescription)
+        case .reloadVPNConfiguration(let systemError):
+            return String(format: NSLocalizedString("Failed to reload a VPN configuration: %@", comment: ""), systemError.localizedDescription)
 
-                case .saveTunnel(let systemError):
-                    return String(format: NSLocalizedString("Failure to save a VPN tunnel configuration: %@", comment: ""), systemError.localizedDescription)
+        case .saveVPNConfiguration(let systemError):
+            return String(format: NSLocalizedString("Failed to save a VPN tunnel configuration: %@", comment: ""), systemError.localizedDescription)
 
-                case .obtainKeychainRef(_):
-                    return NSLocalizedString("Failure obtaining the keychain reference for the VPN configuration", comment: "")
-                }
-            }
+        case .obtainPersistentKeychainReference(_):
+            return NSLocalizedString("Failed to obtain the persistent keychain reference for the VPN configuration", comment: "")
 
-        case .stopTunnel(let systemError):
-            return String(format: NSLocalizedString("System error: %@", comment: ""), systemError.localizedDescription)
+        case .startVPNTunnel(let systemError):
+            return String(format: NSLocalizedString("System error when starting the VPN tunnel: %@", comment: ""), systemError.localizedDescription)
 
-        case .regenerateWireguardPrivateKey(let error):
-            switch error {
-            case .readPublicWireguardKey(_):
-                return NSLocalizedString("Failed to read the existing public key", comment: "")
+        case .stopVPNTunnel(let systemError):
+            return String(format: NSLocalizedString("System error when stopping the VPN tunnel: %@", comment: ""), systemError.localizedDescription)
 
-            case .replaceWireguardKey(let error):
-                switch error {
-                case .network(let urlError):
-                    return String(format: NSLocalizedString("Network error: %@", comment: ""), urlError.localizedDescription)
-                case .server(let serverError):
-                    return String(format: NSLocalizedString("Server error: %@", comment: ""), serverError.localizedDescription)
-                case .decoding(_):
-                    return NSLocalizedString("Decoding error", comment: "")
-                case .encoding(_):
-                    return NSLocalizedString("Encoding error", comment: "")
-                }
+        case .removeVPNConfiguration(let systemError):
+            return String(format: NSLocalizedString("Failed to remove the system VPN configuration: %@", comment: ""), systemError.localizedDescription)
 
-            case .updateTunnelConfiguration(_):
-                return NSLocalizedString("Failure to update VPN tunnel configuration", comment: "")
-            }
-        default:
-            return nil
+        case .removeInconsistentVPNConfiguration(let systemError):
+            return String(format: NSLocalizedString("Failed to remove the outdated system VPN configuration: %@", comment: ""), systemError.localizedDescription)
+
+        case .readTunnelSettings(_):
+            return NSLocalizedString("Failed to read the tunnel settings from Keychain", comment: "")
+
+        case .addTunnelSettings(_):
+            return NSLocalizedString("Failed to add the tunnel settings in Keychain", comment: "")
+
+        case .updateTunnelSettings(_):
+            return NSLocalizedString("Failed to update the tunnel settings in Keychain", comment: "")
+
+        case .removeTunnelSettings(_):
+            return NSLocalizedString("Failed to remove the tunnel settings from Keychain", comment: "")
+
+        case .pushWireguardKey(let rpcError):
+            return String(format: NSLocalizedString("Cannot send the WireGuard key to server: %@", comment: ""), self.describeRpcError(rpcError))
+
+        case .replaceWireguardKey(let rpcError):
+            return String(format: NSLocalizedString("Cannot replace the WireGuard key on server: %@", comment: ""), self.describeRpcError(rpcError))
+
+        case .missingAccount:
+            return NSLocalizedString("Internal error", comment: "")
         }
     }
 
     var recoverySuggestion: String? {
         switch cause {
-        case .regenerateWireguardPrivateKey(.replaceWireguardKey(.server(let serverError)))
-            where serverError.code == .tooManyWireguardKeys:
-            return NSLocalizedString("Remove unused WireGuard keys and try again.", comment: "")
+        case .pushWireguardKey(.server(let serverError)) where serverError.code == .tooManyWireguardKeys, .replaceWireguardKey(.server(let serverError)) where serverError.code == .tooManyWireguardKeys:
+            return NSLocalizedString("Remove unused WireGuard keys and try again", comment: "")
 
         default:
             return nil
@@ -103,6 +101,22 @@ struct TunnelErrorPresentation: ErrorPresentation {
         return [
             UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel, handler: nil)
         ]
+    }
+
+    private func describeRpcError(_ rpcError: MullvadRpc.Error) -> String {
+        switch rpcError {
+        case .network(let urlError):
+            return urlError.localizedDescription
+
+        case .server(let serverError):
+            return serverError.errorDescription ?? serverError.message
+
+        case .encoding:
+            return NSLocalizedString("Server request encoding error", comment: "")
+
+        case .decoding:
+            return NSLocalizedString("Server response decoding error", comment: "")
+        }
     }
 
 }

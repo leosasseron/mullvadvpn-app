@@ -12,6 +12,17 @@ import os
 
 private let kMinimumAccountTokenLength = 10
 
+enum AuthenticationMethod {
+    case existingAccount, newAccount
+}
+
+enum LoginState {
+    case `default`
+    case authenticating(AuthenticationMethod)
+    case failure(Account.Error)
+    case success(AuthenticationMethod)
+}
+
 class LoginViewController: UIViewController, RootContainment {
 
     @IBOutlet var keyboardToolbar: UIToolbar!
@@ -310,7 +321,14 @@ private extension LoginState {
             }
 
         case .failure(let error):
-            return error.failureReason ?? ""
+            switch error {
+            case .createAccount(let rpcError):
+                return self.describeRpcError(rpcError)
+            case .verifyAccount(let rpcError):
+                return self.describeRpcError(rpcError)
+            case .tunnelConfiguration:
+                return NSLocalizedString("Internal error", comment: "")
+            }
 
         case .success(let method):
             switch method {
@@ -319,6 +337,22 @@ private extension LoginState {
             case .newAccount:
                 return NSLocalizedString("Account created", comment: "")
             }
+        }
+    }
+
+    private func describeRpcError(_ rpcError: MullvadRpc.Error) -> String {
+        switch rpcError {
+        case .network(let urlError):
+            return urlError.localizedDescription
+
+        case .server(let serverError):
+            return serverError.errorDescription ?? serverError.message
+
+        case .encoding:
+            return NSLocalizedString("Server request encoding error", comment: "")
+
+        case .decoding:
+            return NSLocalizedString("Server response decoding error", comment: "")
         }
     }
 }

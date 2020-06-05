@@ -96,7 +96,7 @@ class AsyncOperation: Operation {
 class AsyncBlockOperation: AsyncOperation {
     private let block: (@escaping () -> Void) -> Void
 
-    init(with block: @escaping (@escaping () -> Void) -> Void) {
+    init(block: @escaping (@escaping () -> Void) -> Void) {
         self.block = block
         super.init()
     }
