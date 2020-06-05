@@ -18,7 +18,6 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
     @IBOutlet var cityLabel: UILabel!
     @IBOutlet var connectionPanel: ConnectionPanelView!
 
-    private var setRelaysSubscriber: AnyCancellable?
     private var startStopTunnelSubscriber: AnyCancellable?
     private var tunnelStateSubscriber: AnyCancellable?
 
@@ -146,17 +145,15 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
     }
 
     private func disconnectTunnel() {
-        startStopTunnelSubscriber = TunnelManager.shared.stopTunnel()
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { (completion) in
-                if case .failure(let error) = completion {
-                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to stop the VPN tunnel"))
+        TunnelManager.shared.stopTunnel { (result) in
+            if case .failure(let error) = result {
+                os_log(.error, "%{public}s", error.displayChain(message: "Failed to stop the VPN tunnel"))
 
-                    let presentation = TunnelErrorPresentation(context: .stopTunnel, cause: error)
-                    
-                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
-                }
-            })
+                let presentation = TunnelErrorPresentation(context: .stopTunnel, cause: error)
+
+                self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
+            }
+        }
     }
 
     private func showAccountViewForExpiredAccount() {
@@ -181,18 +178,18 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
 
         let relayConstraints = RelayConstraints(location: .only(selectedLocation))
 
-        setRelaysSubscriber = TunnelManager.shared.setRelayConstraints(relayConstraints)
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { (completion) in
-                switch completion {
-                case .finished:
-                    os_log(.debug, "Updated relay constraints: %{public}s", String(reflecting: relayConstraints))
-                    self.connectTunnel()
+        TunnelManager.shared.setRelayConstraints(relayConstraints) { [weak self] (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    os_log(.debug, "Updated relay constraints: %{public}s", "\(relayConstraints)")
+                    self?.connectTunnel()
 
                 case .failure(let error):
                     os_log(.error, "Failed to update relay constraints: %{public}s", error.localizedDescription)
                 }
-            })
+            }
+        }
     }
 
 }

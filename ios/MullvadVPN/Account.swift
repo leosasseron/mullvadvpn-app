@@ -74,10 +74,15 @@ class Account {
         return rpc.createAccount()
             .publisher
             .mapError { .createAccount($0) }
-            .flatMap { (newAccountToken) in
-                TunnelManager.shared.setAccount(accountToken: newAccountToken)
-                    .mapError { .tunnelConfiguration($0) }
-                    .map { (newAccountToken, Date()) }
+            .flatMap { (newAccountToken) -> Future<(String, Date), Error> in
+                return Future({ (fulfill) in
+                    TunnelManager.shared.setAccount(accountToken: newAccountToken) { (result) in
+                        let result = result
+                            .mapError { Error.tunnelConfiguration($0) }
+                            .map { (newAccountToken, Date()) }
+                        fulfill(result)
+                    }
+                })
         }
         .receive(on: DispatchQueue.main)
         .map { (accountToken, expiry) -> String in
@@ -93,10 +98,15 @@ class Account {
         return rpc.getAccountExpiry(accountToken: accountToken)
             .publisher
             .mapError { .verifyAccount($0) }
-            .flatMap { (expiry) in
-                TunnelManager.shared.setAccount(accountToken: accountToken)
-                    .mapError { .tunnelConfiguration($0) }
-                    .map { expiry }
+            .flatMap { (expiry) -> Future<Date, Error> in
+                return Future({ (fulfill) in
+                    TunnelManager.shared.setAccount(accountToken: accountToken) { (result) in
+                        let result = result
+                            .mapError { Error.tunnelConfiguration($0) }
+                            .map { expiry }
+                        fulfill(result)
+                    }
+                })
         }
         .receive(on: DispatchQueue.main)
         .map { (expiry) in

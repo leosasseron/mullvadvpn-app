@@ -51,9 +51,6 @@ struct TunnelErrorPresentation: ErrorPresentation {
         case .startVPNTunnel(let systemError):
             return String(format: NSLocalizedString("System error when starting the VPN tunnel: %@", comment: ""), systemError.localizedDescription)
 
-        case .stopVPNTunnel(let systemError):
-            return String(format: NSLocalizedString("System error when stopping the VPN tunnel: %@", comment: ""), systemError.localizedDescription)
-
         case .removeVPNConfiguration(let systemError):
             return String(format: NSLocalizedString("Failed to remove the system VPN configuration: %@", comment: ""), systemError.localizedDescription)
 

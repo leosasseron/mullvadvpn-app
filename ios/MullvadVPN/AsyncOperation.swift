@@ -12,7 +12,7 @@ import Foundation
 class AsyncOperation: Operation {
 
     /// A state lock used for manipulating the operation state flags in a thread safe fashion.
-    private let stateLock = NSRecursiveLock()
+    fileprivate let stateLock = NSRecursiveLock()
 
     /// Operation state flags.
     private var _isExecuting = false
@@ -106,4 +106,59 @@ class AsyncBlockOperation: AsyncOperation {
             self?.finish()
         }
     }
+}
+
+protocol OutputOperation {
+    associatedtype Output
+
+    var output: Output? { get }
+
+    func finish(with output: Output)
+}
+
+class AsyncBlockOutputOperation<Output>: AsyncOperation, OutputOperation {
+
+    private enum Executor {
+        case callback((@escaping (Output) -> Void) -> Void)
+        case transform(() -> Output)
+    }
+
+    var output: Output? {
+        return stateLock.withCriticalBlock { self._output }
+    }
+
+    private let executor: Executor
+    private var _output: Output?
+
+    private init(executor: Executor) {
+        self.executor = executor
+    }
+
+    convenience init(block: @escaping (@escaping (Output) -> Void) -> Void) {
+        self.init(executor: .callback(block))
+    }
+
+    convenience init(block: @escaping () -> Output) {
+        self.init(executor: .transform(block))
+    }
+
+    override func main() {
+        switch executor {
+        case .callback(let block):
+            block { [weak self] (result) in
+                self?.finish(with: result)
+            }
+
+        case .transform(let block):
+            self.finish(with: block())
+        }
+    }
+
+    func finish(with output: Output) {
+        stateLock.withCriticalBlock {
+            self._output = output
+            self.finish()
+        }
+    }
+
 }

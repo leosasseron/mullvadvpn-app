@@ -108,7 +108,7 @@ class SelectLocationController: UITableViewController {
             .mapError { SelectLocationControllerError.loadRelayList($0) }
             .map { $0.relayList.sorted() }
             .flatMap({ (filteredRelayList) in
-                TunnelManager.shared.getRelayConstraints()
+                Future(TunnelManager.shared.getRelayConstraints)
                     .mapError { SelectLocationControllerError.getRelayConstraints($0) }
                     .map { (filteredRelayList, $0) }
             })
