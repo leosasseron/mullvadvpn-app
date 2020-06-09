@@ -21,7 +21,6 @@ class AccountViewController: UIViewController {
     @IBOutlet var activityIndicator: SpinnerActivityIndicatorView!
 
     private var accountExpirySubscriber: AnyCancellable?
-    private var logoutSubscriber: AnyCancellable?
     private var copyToPasteboardSubscriber: AnyCancellable?
     private var requestProductsSubscriber: AnyCancellable?
     private var purchaseSubscriber: AnyCancellable?
@@ -225,24 +224,24 @@ class AccountViewController: UIViewController {
             message: message,
             preferredStyle: .alert)
 
-        present(alertController, animated: true) {
-            self.logoutSubscriber = Account.shared.logout()
-                .delay(for: .seconds(1), scheduler: DispatchQueue.main)
-                .sink(receiveCompletion: { (completion) in
-                    switch completion {
-                    case .failure(let error):
-                        alertController.dismiss(animated: true) {
-                            let errorPresentation = AccountErrorPresentation(context: .logout, cause: error)
+        self.alertPresenter.enqueue(alertController, presentingController: self)
 
-                            self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
-                        }
-
-                    case .finished:
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(1)) {
+            Account.shared.logout { (result) in
+                alertController.dismiss(animated: true) {
+                    switch result {
+                    case .success:
                         self.performSegue(
                             withIdentifier: SegueIdentifier.Account.logout.rawValue,
                             sender: self)
+
+                    case .failure(let error):
+                        let errorPresentation = AccountErrorPresentation(context: .logout, cause: error)
+
+                        self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
                     }
-                })
+                }
+            }
         }
     }
 

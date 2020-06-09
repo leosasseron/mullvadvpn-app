@@ -18,7 +18,6 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
     @IBOutlet var cityLabel: UILabel!
     @IBOutlet var connectionPanel: ConnectionPanelView!
 
-    private var startStopTunnelSubscriber: AnyCancellable?
     private var tunnelStateSubscriber: AnyCancellable?
 
     private let alertPresenter = AlertPresenter()
@@ -130,10 +129,13 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
     }
 
     private func connectTunnel() {
-        startStopTunnelSubscriber = TunnelManager.shared.startTunnel()
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { (completion) in
-                if case .failure(let error) = completion {
+        TunnelManager.shared.startTunnel { (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    break
+
+                case .failure(let error):
                     os_log(.error, "%{public}s",
                            error.displayChain(message: "Failed to start the VPN tunnel"))
 
@@ -141,7 +143,8 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
 
                     self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                 }
-            })
+            }
+        }
     }
 
     private func disconnectTunnel() {

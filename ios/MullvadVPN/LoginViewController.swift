@@ -6,7 +6,6 @@
 //  Copyright © 2019 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
 import UIKit
 import os
 
@@ -36,8 +35,6 @@ class LoginViewController: UIViewController, RootContainment {
     @IBOutlet var activityIndicator: SpinnerActivityIndicatorView!
     @IBOutlet var statusImageView: UIImageView!
     @IBOutlet var createAccountButton: AppButton!
-
-    private var loginSubscriber: AnyCancellable?
 
     private var loginState = LoginState.default {
         didSet {
@@ -156,16 +153,18 @@ class LoginViewController: UIViewController, RootContainment {
 
         beginLogin(method: .existingAccount)
 
-        loginSubscriber = Account.shared.login(with: accountToken)
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { (completionResult) in
-                switch completionResult {
-                case .finished:
-                    self.endLogin(.success(.existingAccount))
-                case .failure(let error):
-                    self.endLogin(.failure(error))
-                }
-            }, receiveValue: { _ in })
+        Account.shared.login(with: accountToken) { (result) in
+            switch result {
+            case .success:
+                self.endLogin(.success(.existingAccount))
+
+            case .failure(let error):
+                os_log(.error, "%{public}s",
+                       error.displayChain(message: "Failed to log in with existing account"))
+
+                self.endLogin(.failure(error))
+            }
+        }
     }
 
     @IBAction func createNewAccount() {
@@ -174,21 +173,19 @@ class LoginViewController: UIViewController, RootContainment {
         accountTextField.autoformattingText = ""
         updateKeyboardToolbar()
 
-        loginSubscriber = Account.shared.loginWithNewAccount()
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { (completionResult) in
-                switch completionResult {
-                case .finished:
-                    self.endLogin(.success(.newAccount))
-                case .failure(let error):
-                    os_log(.error, "%{public}s",
-                           error.displayChain(message: "Failed to log in with new account"))
-                    
-                    self.endLogin(.failure(error))
-                }
-            }, receiveValue: { (newAccountToken) in
+        Account.shared.loginWithNewAccount { (result) in
+            switch result {
+            case .success(let (newAccountToken, _)):
                 self.accountTextField.autoformattingText = newAccountToken
-            })
+
+                self.endLogin(.success(.newAccount))
+            case .failure(let error):
+                os_log(.error, "%{public}s",
+                       error.displayChain(message: "Failed to log in with new account"))
+
+                self.endLogin(.failure(error))
+            }
+        }
     }
 
     // MARK: - Private

@@ -35,7 +35,6 @@ class WireguardKeysViewController: UIViewController {
     private var publicKeySubscriber: AnyCancellable?
     private var loadKeySubscriber: AnyCancellable?
     private var verifyKeySubscriber: AnyCancellable?
-    private var regenerateKeySubscriber: AnyCancellable?
     private var creationDateTimerSubscriber: AnyCancellable?
     private var copyToPasteboardSubscriber: AnyCancellable?
 
@@ -185,16 +184,12 @@ class WireguardKeysViewController: UIViewController {
     }
 
     private func regeneratePrivateKey() {
-        regenerateKeySubscriber = TunnelManager.shared.regeneratePrivateKey()
-            .receive(on: DispatchQueue.main)
-            .handleEvents(receiveSubscription: { (_) in
-                self.updateViewState(.regeneratingKey)
-            }, receiveCompletion: { (completion) in
-                self.updateViewState(.default)
-            })
-            .sink { (completion) in
-                switch completion {
-                case .finished:
+        self.updateViewState(.regeneratingKey)
+
+        TunnelManager.shared.regeneratePrivateKey { (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
                     break
 
                 case .failure(let error):
@@ -205,6 +200,9 @@ class WireguardKeysViewController: UIViewController {
 
                     self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
                 }
+
+                self.updateViewState(.default)
+            }
         }
     }
 

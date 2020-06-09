@@ -6,7 +6,6 @@
 //  Copyright © 2019 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
 import Foundation
 import NetworkExtension
 import StoreKit
@@ -70,58 +69,79 @@ class Account {
         UserDefaults.standard.set(true, forKey: UserDefaultsKeys.isAgreedToTermsOfService.rawValue)
     }
 
-    func loginWithNewAccount() -> AnyPublisher<String, Error> {
-        return rpc.createAccount()
-            .publisher
-            .mapError { .createAccount($0) }
-            .flatMap { (newAccountToken) -> Future<(String, Date), Error> in
-                return Future({ (fulfill) in
-                    TunnelManager.shared.setAccount(accountToken: newAccountToken) { (result) in
-                        let result = result
-                            .mapError { Error.tunnelConfiguration($0) }
-                            .map { (newAccountToken, Date()) }
-                        fulfill(result)
+    func loginWithNewAccount(completionHandler: @escaping (Result<(String, Date), Error>) -> Void) {
+        let urlSessionTask = rpc.createAccount().dataTask { (rpcResult) in
+            DispatchQueue.main.async {
+                switch rpcResult {
+                case .success(let newAccountToken):
+                    let expiry = Date()
+                    self.setupTunnel(accountToken: newAccountToken, expiry: expiry) { (result) in
+                        completionHandler(result.map { (newAccountToken, expiry) })
                     }
-                })
-        }
-        .receive(on: DispatchQueue.main)
-        .map { (accountToken, expiry) -> String in
-            self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
 
-            return accountToken
-        }.eraseToAnyPublisher()
+                case .failure(let error):
+                    completionHandler(.failure(.createAccount(error)))
+                }
+            }
+        }
+
+        urlSessionTask?.resume()
     }
 
     /// Perform the login and save the account token along with expiry (if available) to the
     /// application preferences.
-    func login(with accountToken: String) -> AnyPublisher<(), Error> {
-        return rpc.getAccountExpiry(accountToken: accountToken)
-            .publisher
-            .mapError { .verifyAccount($0) }
-            .flatMap { (expiry) -> Future<Date, Error> in
-                return Future({ (fulfill) in
-                    TunnelManager.shared.setAccount(accountToken: accountToken) { (result) in
-                        let result = result
-                            .mapError { Error.tunnelConfiguration($0) }
-                            .map { expiry }
-                        fulfill(result)
+    func login(with accountToken: String, completionHandler: @escaping (Result<Date, Error>) -> Void) {
+        let urlSessionTask = rpc.getAccountExpiry(accountToken: accountToken).dataTask { (rpcResult) in
+            DispatchQueue.main.async {
+                switch rpcResult {
+                case .success(let expiry):
+                    self.setupTunnel(accountToken: accountToken, expiry: expiry) { (result) in
+                        completionHandler(result.map { expiry })
                     }
-                })
+                    
+                case .failure(let error):
+                    completionHandler(.failure(.verifyAccount(error)))
+                }
+            }
         }
-        .receive(on: DispatchQueue.main)
-        .map { (expiry) in
-            self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
-        }.eraseToAnyPublisher()
+
+        urlSessionTask?.resume()
     }
 
     /// Perform the logout by erasing the account token and expiry from the application preferences.
-    func logout() -> AnyPublisher<(), Error> {
-        return TunnelManager.shared.unsetAccount()
-            .receive(on: DispatchQueue.main)
-            .mapError { .tunnelConfiguration($0) }
-            .map(self.removeAccountFromPreferences)
-            .eraseToAnyPublisher()
+    func logout(completionHandler: @escaping (Result<(), Error>) -> Void) {
+        TunnelManager.shared.unsetAccount { (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self.removeAccountFromPreferences()
+
+                    completionHandler(.success(()))
+
+                case .failure(let error):
+                    completionHandler(.failure(.tunnelConfiguration(error)))
+                }
+            }
+        }
     }
+
+    private func setupTunnel(accountToken: String, expiry: Date, completionHandler: @escaping (Result<(), Error>) -> Void) {
+          TunnelManager.shared.setAccount(accountToken: accountToken) { (managerResult) in
+              DispatchQueue.main.async {
+                  switch managerResult {
+                  case .success:
+                      self.saveAccountToPreferences(
+                          accountToken: accountToken,
+                          expiry: expiry
+                      )
+                      completionHandler(.success(()))
+
+                  case .failure(let error):
+                      completionHandler(.failure(.tunnelConfiguration(error)))
+                  }
+              }
+          }
+      }
 
     private func saveAccountToPreferences(accountToken: String, expiry: Date) {
         let preferences = UserDefaults.standard
