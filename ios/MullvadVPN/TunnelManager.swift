@@ -120,6 +120,27 @@ extension TunnelState: CustomDebugStringConvertible {
     }
 }
 
+protocol TunnelObserver: class {
+    func tunnelStateDidChange(tunnelState: TunnelState)
+    func tunnelPublicKeyDidChange(publicKey: WireguardPublicKey?)
+}
+
+private final class WeakTunnelObserverBox: TunnelObserver {
+    private(set) weak var observer: TunnelObserver?
+
+    init<T: TunnelObserver>(observer: T) {
+        self.observer = observer
+    }
+
+    func tunnelStateDidChange(tunnelState: TunnelState) {
+        self.observer?.tunnelStateDidChange(tunnelState: tunnelState)
+    }
+
+    func tunnelPublicKeyDidChange(publicKey: WireguardPublicKey?) {
+        self.observer?.tunnelPublicKeyDidChange(publicKey: publicKey)
+    }
+}
+
 /// A class that provides a convenient interface for VPN tunnels configuration, manipulation and
 /// monitoring.
 class TunnelManager {
@@ -170,6 +191,9 @@ class TunnelManager {
         /// A failure to replace the public WireGuard key
         case replaceWireguardKey(MullvadRpc.Error)
 
+        /// A failure to verify the public WireGuard key
+        case verifyWireguardKey(MullvadRpc.Error)
+
         var errorDescription: String? {
             switch self {
             case .missingAccount:
@@ -200,6 +224,8 @@ class TunnelManager {
                 return "Failed to push the WireGuard key to server"
             case .replaceWireguardKey:
                 return "Failed to replace the WireGuard key on server"
+            case .verifyWireguardKey:
+                return "Failed to verify the WireGuard key on server"
             }
         }
     }
@@ -225,6 +251,9 @@ class TunnelManager {
     private var tunnelProvider: TunnelProviderManagerType?
     private var tunnelIpc: PacketTunnelIpc?
 
+    private let stateLock = NSRecursiveLock()
+    private var tunnelObservers = [WeakTunnelObserverBox]()
+
     /// A VPN connection status observer
     private var connectionStatusObserver: NSObjectProtocol?
 
@@ -235,10 +264,42 @@ class TunnelManager {
 
     // MARK: - Public
 
-    @Published private(set) var tunnelState = TunnelState.disconnected
+    private var _tunnelState = TunnelState.disconnected
+    private(set) var tunnelState: TunnelState {
+        set {
+            stateLock.withCriticalBlock {
+                _tunnelState = newValue
+
+                notifyTunnelObservers { (observer) in
+                    observer.tunnelStateDidChange(tunnelState: newValue)
+                }
+            }
+        }
+        get {
+            stateLock.withCriticalBlock {
+                return _tunnelState
+            }
+        }
+    }
 
     /// A last known public key
-    @Published private(set) var publicKey: WireguardPublicKey?
+    private var _publicKey: WireguardPublicKey?
+    private(set) var publicKey: WireguardPublicKey? {
+        set {
+            stateLock.withCriticalBlock {
+                _publicKey = newValue
+
+                notifyTunnelObservers { (observer) in
+                    observer.tunnelPublicKeyDidChange(publicKey: newValue)
+                }
+            }
+        }
+        get {
+            stateLock.withCriticalBlock {
+                return _publicKey
+            }
+        }
+    }
 
     /// Initialize the TunnelManager with the tunnel from the system
     ///
@@ -350,45 +411,18 @@ class TunnelManager {
             switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
             case .success(let keychainEntry):
                 let tunnelSettings = keychainEntry.tunnelConfiguration
+                let interfaceSettings = tunnelSettings.interface
 
-                // Make sure to avoid pushing the wireguard keys when addresses are assigned
-                guard tunnelSettings.interface.addresses.isEmpty else {
-                    startVPNTunnel()
-                    return
-                }
-
-                let publicKey = tunnelSettings.interface.privateKey.publicKey
-
-                let rpcRequest = self.rpc.pushWireguardKey(
-                    accountToken: accountToken,
-                    publicKey: publicKey.rawRepresentation
-                )
-
-                let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
-                    switch rpcResult {
-                    case .success(let associatedAddresses):
-                        let updateResult = TunnelSettingsManager
-                            .update(searchTerm: .accountToken(accountToken)) { (tunnelSettings) in
-                                tunnelSettings.interface.addresses = [
-                                    associatedAddresses.ipv4Address,
-                                    associatedAddresses.ipv6Address
-                                ]
-                        }
-
-                        switch updateResult {
-                        case .success:
+                // Push wireguard key if addresses were not received yet
+                if interfaceSettings.addresses.isEmpty {
+                    self.pushWireguardKeyAndUpdateSettings(
+                        accountToken: accountToken,
+                        publicKey: interfaceSettings.privateKey.publicKey) { (result) in
                             startVPNTunnel()
-
-                        case .failure(let error):
-                            finish(.failure(.updateTunnelSettings(error)))
-                        }
-
-                    case .failure(let error):
-                        finish(.failure(.pushWireguardKey(error)))
                     }
+                } else {
+                    startVPNTunnel()
                 }
-
-                urlSessionTask?.resume()
 
             case .failure(let error):
                 finish(.failure(.readTunnelSettings(error)))
@@ -486,10 +520,12 @@ class TunnelManager {
                         .rawRepresentation
 
                     // Remove WireGuard key from server
-                    let urlSessionTask = self.rpc.removeWireguardKey(
+                    let rpcRequest = self.rpc.removeWireguardKey(
                         accountToken: keychainEntry.accountToken,
                         publicKey: publicKey
-                    ).dataTask(completionHandler: { (result) in
+                    )
+
+                    let urlSessionTask = rpcRequest.dataTask(completionHandler: { (result) in
                         switch result {
                         case .success(let isRemoved):
                             os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
@@ -501,6 +537,7 @@ class TunnelManager {
                         cleanupState()
                         finish(.success(()))
                     })
+
                     urlSessionTask?.resume()
 
                 case .failure(let error):
@@ -543,68 +580,87 @@ class TunnelManager {
         addExclusiveOperation(operation)
     }
 
-    func regeneratePrivateKey(completionHandler: @escaping (Result<(), Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+    func verifyPublicKey(completionHandler: @escaping (Result<Bool, Error>) -> Void) {
+        let operation = AsyncBlockOutputOperation<Result<Bool, Error>> { (finish) in
             guard let accountToken = self.accountToken else {
-                completionHandler(.failure(.missingAccount))
+                finish(.failure(.missingAccount))
                 return
             }
 
-            let newPrivateKey = WireguardPrivateKey()
             let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
-
             switch result {
             case .success(let keychainEntry):
-                let oldPublicKey = keychainEntry.tunnelConfiguration.interface
+                let publicKey = keychainEntry.tunnelConfiguration.interface
                     .privateKey
-                    .publicKey
-                    .rawRepresentation
-                let newPublicKey = newPrivateKey.publicKey.rawRepresentation
+                    .publicKey.rawRepresentation
 
-                let urlSessionTask = self.rpc.replaceWireguardKey(
+                let rpcRequest = self.rpc.checkWireguardKey(
                     accountToken: accountToken,
-                    oldPublicKey: oldPublicKey,
-                    newPublicKey: newPublicKey
-                ).dataTask { (rpcResult) in
-                    switch rpcResult {
-                    case .success(let associatedAddresses):
-                        let updateResult = TunnelSettingsManager.update(searchTerm: .accountToken(accountToken)) {
-                            (tunnelConfiguration) in
-                            tunnelConfiguration.interface.privateKey = newPrivateKey
-                            tunnelConfiguration.interface.addresses = [
-                                associatedAddresses.ipv4Address,
-                                associatedAddresses.ipv6Address
-                            ]
-                        }
+                    publicKey: publicKey
+                )
 
-                        switch updateResult {
-                        case .success:
-                            // Save new public key
-                            self.publicKey = newPrivateKey.publicKey
-
-                            self.reloadPacketTunnelSettings { (ipcResult) in
-                                switch ipcResult {
-                                case .success:
-                                    finish(.success(()))
-
-                                case .failure(let error):
-                                    // Ignore Packet Tunnel IPC errors but log them
-                                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
-
-                                    finish(.success(()))
-                                }
-                            }
-
-                        case .failure(let error):
-                            finish(.failure(.updateTunnelSettings(error)))
-                        }
-
-                    case .failure(let error):
-                        finish(.failure(.replaceWireguardKey(error)))
-                    }
+                let urlSessionTask = rpcRequest.dataTask { (result) in
+                    finish(result.mapError {Error.verifyWireguardKey($0) })
                 }
 
                 urlSessionTask?.resume()
+
+            case .failure(let error):
+                finish(.failure(.readTunnelSettings(error)))
+            }
+        }
+
+        operation.completionBlock = {
+            if let output = operation.output {
+                completionHandler(output)
+            }
+        }
+
+        addExclusiveOperation(operation)
+    }
+
+    func regeneratePrivateKey(completionHandler: @escaping (Result<(), Error>) -> Void) {
+        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+            guard let accountToken = self.accountToken else {
+                finish(.failure(.missingAccount))
+                return
+            }
+
+            let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
+            switch result {
+            case .success(let keychainEntry):
+                let newPrivateKey = WireguardPrivateKey()
+                let oldPublicKey = keychainEntry.tunnelConfiguration.interface
+                    .privateKey
+                    .publicKey
+
+                self.replaceWireguardKeyAndUpdateSettings(
+                    accountToken: accountToken,
+                    oldPublicKey: oldPublicKey,
+                    newPrivateKey: newPrivateKey
+                ) { (result) in
+                    switch result {
+                    case .success:
+                        // Save new public key
+                        self.publicKey = newPrivateKey.publicKey
+
+                        self.reloadPacketTunnelSettings { (ipcResult) in
+                            switch ipcResult {
+                            case .success:
+                                finish(.success(()))
+
+                            case .failure(let error):
+                                // Ignore Packet Tunnel IPC errors but log them
+                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
+
+                                finish(.success(()))
+                            }
+                        }
+
+                    case .failure(let error):
+                        finish(.failure(error))
+                    }
+                }
 
             case .failure(let error):
                 finish(.failure(.readTunnelSettings(error)))
@@ -687,6 +743,48 @@ class TunnelManager {
         addExclusiveOperation(operation)
     }
 
+    // MARK: - Tunnel observeration
+
+    /// Add tunnel observer.
+    /// In order to cancel the observation, either call `removeTunnelObserver(_:)` or simply release
+    /// the observer.
+    public func addTunnelObserver<T: TunnelObserver>(_ observer: T) {
+        stateLock.withCriticalBlock {
+            let boxed = WeakTunnelObserverBox(observer: observer)
+
+            self.tunnelObservers.append(boxed)
+        }
+    }
+
+    /// Remove tunnel observer.
+    public func removeTunnelObserver(_ observer: TunnelObserver) {
+        stateLock.withCriticalBlock {
+            self.tunnelObservers.removeAll { (box) -> Bool in
+                return box.observer === observer
+            }
+        }
+    }
+
+    /// Private helper that loops through the registered observers and calls the given closure
+    /// for each of them. Additionally this method takes care of discarding released observers.
+    private func notifyTunnelObservers(block: (TunnelObserver) -> Void) {
+        stateLock.withCriticalBlock {
+            var discardIndices = [Int]()
+
+            self.tunnelObservers.enumerated().forEach { (index, anyObserver) in
+                if anyObserver.observer == nil {
+                    discardIndices.append(index)
+                } else {
+                    block(anyObserver)
+                }
+            }
+
+            discardIndices.reversed().forEach { (index) in
+                self.tunnelObservers.remove(at: index)
+            }
+        }
+    }
+
     // MARK: - Operation management
 
     private lazy var operationQueue: OperationQueue = {
@@ -715,7 +813,7 @@ class TunnelManager {
         if let tunnelIpc = tunnelIpc {
             tunnelIpc.getTunnelInformation { (result) in
                 completionHandler(result.mapError({ (ipcError) -> TunnelIpcRequestError in
-                    TunnelIpcRequestError.send(ipcError)
+                    return TunnelIpcRequestError.send(ipcError)
                 }))
             }
         } else {
@@ -727,7 +825,7 @@ class TunnelManager {
         if let tunnelIpc = tunnelIpc {
             tunnelIpc.reloadTunnelSettings { (result) in
                 completionHandler(result.mapError({ (ipcError) -> TunnelIpcRequestError in
-                    TunnelIpcRequestError.send(ipcError)
+                    return TunnelIpcRequestError.send(ipcError)
                 }))
             }
         } else {
@@ -793,6 +891,82 @@ class TunnelManager {
 
             self.publicKey = nil
         }
+    }
+
+    private func pushWireguardKeyAndUpdateSettings(
+        accountToken: String,
+        publicKey: WireguardPublicKey,
+        completionHandler: @escaping (Result<(), Error>) -> Void)
+    {
+        let rpcRequest = self.rpc.pushWireguardKey(
+            accountToken: accountToken,
+            publicKey: publicKey.rawRepresentation
+        )
+
+        let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
+            switch rpcResult {
+            case .success(let associatedAddresses):
+                let updateResult = TunnelSettingsManager
+                    .update(searchTerm: .accountToken(accountToken)) { (tunnelSettings) in
+                        tunnelSettings.interface.addresses = [
+                            associatedAddresses.ipv4Address,
+                            associatedAddresses.ipv6Address
+                        ]
+                }
+
+                switch updateResult {
+                case .success:
+                    completionHandler(.success(()))
+
+                case .failure(let error):
+                    completionHandler(.failure(.updateTunnelSettings(error)))
+                }
+
+            case .failure(let error):
+                completionHandler(.failure(.pushWireguardKey(error)))
+            }
+        }
+
+        urlSessionTask?.resume()
+    }
+
+    private func replaceWireguardKeyAndUpdateSettings(
+        accountToken: String,
+        oldPublicKey: WireguardPublicKey,
+        newPrivateKey: WireguardPrivateKey,
+        completionHandler: @escaping (Result<(), Error>) -> Void)
+    {
+        let rpcRequest = self.rpc.replaceWireguardKey(
+            accountToken: accountToken,
+            oldPublicKey: oldPublicKey.rawRepresentation,
+            newPublicKey: newPrivateKey.publicKey.rawRepresentation
+        )
+
+        let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
+            switch rpcResult {
+            case .success(let associatedAddresses):
+                let updateResult = TunnelSettingsManager.update(searchTerm: .accountToken(accountToken)) {
+                    (tunnelConfiguration) in
+                    tunnelConfiguration.interface.privateKey = newPrivateKey
+                    tunnelConfiguration.interface.addresses = [
+                        associatedAddresses.ipv4Address,
+                        associatedAddresses.ipv6Address
+                    ]
+                }
+
+                switch updateResult {
+                case .success:
+                    completionHandler(.success(()))
+                case .failure(let error):
+                    completionHandler(.failure(.updateTunnelSettings(error)))
+                }
+
+            case .failure(let error):
+                completionHandler(.failure(.replaceWireguardKey(error)))
+            }
+        }
+
+        urlSessionTask?.resume()
     }
 
     /// Initiates the `tunnelState` update

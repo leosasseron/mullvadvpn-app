@@ -319,10 +319,8 @@ private extension LoginState {
 
         case .failure(let error):
             switch error {
-            case .createAccount(let rpcError):
-                return self.describeRpcError(rpcError)
-            case .verifyAccount(let rpcError):
-                return self.describeRpcError(rpcError)
+            case .createAccount(let rpcError), .verifyAccount(let rpcError):
+                return rpcError.errorChainDescription ?? ""
             case .tunnelConfiguration:
                 return NSLocalizedString("Internal error", comment: "")
             }
@@ -334,22 +332,6 @@ private extension LoginState {
             case .newAccount:
                 return NSLocalizedString("Account created", comment: "")
             }
-        }
-    }
-
-    private func describeRpcError(_ rpcError: MullvadRpc.Error) -> String {
-        switch rpcError {
-        case .network(let urlError):
-            return urlError.localizedDescription
-
-        case .server(let serverError):
-            return serverError.errorDescription ?? serverError.message
-
-        case .encoding:
-            return NSLocalizedString("Server request encoding error", comment: "")
-
-        case .decoding:
-            return NSLocalizedString("Server response decoding error", comment: "")
         }
     }
 }

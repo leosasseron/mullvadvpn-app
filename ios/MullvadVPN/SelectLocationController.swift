@@ -6,34 +6,32 @@
 //  Copyright © 2019 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
 import UIKit
 import os
 
 private let kCellIdentifier = "Cell"
 
-enum SelectLocationControllerError: ChainedError {
-    case loadRelayList(RelayCacheError)
-    case getRelayConstraints(TunnelManager.Error)
+class SelectLocationController: UITableViewController {
 
-    var errorDescription: String? {
-        switch self {
-        case .loadRelayList:
-            return "Failure to load a relay list"
-        case .getRelayConstraints:
-            return "Failure to retrieve relay constraints"
+    private enum Error: ChainedError {
+        case loadRelayList(RelayCacheError)
+        case getRelayConstraints(TunnelManager.Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .loadRelayList:
+                return "Failure to load a relay list"
+            case .getRelayConstraints:
+                return "Failure to get relay constraints"
+            }
         }
     }
-}
-
-class SelectLocationController: UITableViewController {
 
     private let relayCache = try! RelayCache.withDefaultLocationAndEphemeralSession().get()
     private var relayList: RelayList?
     private var relayConstraints: RelayConstraints?
     private var expandedItems = [RelayLocation]()
     private var dataSource: DataSource?
-    private var loadDataSubscriber: AnyCancellable?
 
     @IBOutlet var activityIndicator: SpinnerActivityIndicatorView!
 
@@ -103,32 +101,42 @@ class SelectLocationController: UITableViewController {
 
     // MARK: - Relay list handling
 
-    private func loadData() {
-        loadDataSubscriber = relayCache.read()
-            .mapError { SelectLocationControllerError.loadRelayList($0) }
-            .map { $0.relayList.sorted() }
-            .flatMap({ (filteredRelayList) in
-                Future(TunnelManager.shared.getRelayConstraints)
-                    .mapError { SelectLocationControllerError.getRelayConstraints($0) }
-                    .map { (filteredRelayList, $0) }
-            })
-            .receive(on: DispatchQueue.main)
-            .handleEvents(receiveSubscription: { [weak self] _ in
-                self?.activityIndicator.startAnimating()
-            }, receiveCompletion: { [weak self] _ in
-                self?.activityIndicator.stopAnimating()
-            }, receiveCancel: { [weak self] () in
-                self?.activityIndicator.stopAnimating()
-            })
-            .sink(receiveCompletion: { (completion) in
-                if case .failure(let error) = completion {
-                    os_log(.error, "Failed to load the SelectLocation controller: %{public}s", error.localizedDescription)
-                }
-            }) { [weak self] (result) in
-                let (relayList, constraints) = result
+    private func fetchRelays(completionHandler: @escaping (Result<(CachedRelayList, RelayConstraints), Error>) -> Void) {
+        relayCache.read { (result) in
+            switch result {
+            case .success(let cachedRelayList):
+                TunnelManager.shared.getRelayConstraints { (result) in
+                    let result = result
+                        .map { (cachedRelayList, $0) }
+                        .mapError { Error.getRelayConstraints($0) }
 
-                self?.didReceive(relayList: relayList, relayConstraints: constraints)
+                    completionHandler(result)
+                }
+
+            case .failure(let error):
+                completionHandler(.failure(.loadRelayList(error)))
             }
+        }
+    }
+
+    private func loadData() {
+        activityIndicator.startAnimating()
+
+        fetchRelays { [weak self] (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let (cachedRelayList, relayConstraints)):
+                    let relayList = cachedRelayList.relayList.sorted()
+
+                    self?.didReceive(relayList: relayList, relayConstraints: relayConstraints)
+
+                case .failure(let error):
+                    os_log(.error, "%{public}s", error.displayChain())
+                }
+
+                self?.activityIndicator.stopAnimating()
+            }
+        }
     }
 
     private func didReceive(relayList: RelayList, relayConstraints: RelayConstraints) {

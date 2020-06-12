@@ -6,19 +6,20 @@
 //  Copyright © 2019 Mullvad VPN AB. All rights reserved.
 //
 
-import Combine
 import UIKit
 import NetworkExtension
 import os
 
-class ConnectViewController: UIViewController, RootContainment, TunnelControlViewControllerDelegate {
+class ConnectViewController: UIViewController,
+    RootContainment,
+    TunnelControlViewControllerDelegate,
+    TunnelObserver
+{
 
     @IBOutlet var secureLabel: UILabel!
     @IBOutlet var countryLabel: UILabel!
     @IBOutlet var cityLabel: UILabel!
     @IBOutlet var connectionPanel: ConnectionPanelView!
-
-    private var tunnelStateSubscriber: AnyCancellable?
 
     private let alertPresenter = AlertPresenter()
 
@@ -55,9 +56,8 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
 
         connectionPanel.collapseButton.addTarget(self, action: #selector(handleConnectionPanelButton(_:)), for: .touchUpInside)
 
-        tunnelStateSubscriber = TunnelManager.shared.$tunnelState
-            .receive(on: DispatchQueue.main)
-            .assign(to: \.tunnelState, on: self)
+        TunnelManager.shared.addTunnelObserver(self)
+        self.tunnelState = TunnelManager.shared.tunnelState
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -72,6 +72,18 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
             tunnelControlController.view.translatesAutoresizingMaskIntoConstraints = false
             tunnelControlController.delegate = self
         }
+    }
+
+    // MARK: - TunnelObserver
+
+    func tunnelStateDidChange(tunnelState: TunnelState) {
+        DispatchQueue.main.async {
+            self.tunnelState = tunnelState
+        }
+    }
+
+    func tunnelPublicKeyDidChange(publicKey: WireguardPublicKey?) {
+        // no-op
     }
 
     // MARK: - TunnelControlViewControllerDelegate
@@ -139,9 +151,16 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
                     os_log(.error, "%{public}s",
                            error.displayChain(message: "Failed to start the VPN tunnel"))
 
-                    let presentation = TunnelErrorPresentation(context: .startTunnel, cause: error)
+                    let alertController = UIAlertController(
+                        title: NSLocalizedString("Failed to start the VPN tunnel", comment: ""),
+                        message: error.errorChainDescription,
+                        preferredStyle: .alert
+                    )
+                    alertController.addAction(
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                    )
 
-                    self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
+                    self.alertPresenter.enqueue(alertController, presentingController: self)
                 }
             }
         }
@@ -152,9 +171,16 @@ class ConnectViewController: UIViewController, RootContainment, TunnelControlVie
             if case .failure(let error) = result {
                 os_log(.error, "%{public}s", error.displayChain(message: "Failed to stop the VPN tunnel"))
 
-                let presentation = TunnelErrorPresentation(context: .stopTunnel, cause: error)
+                let alertController = UIAlertController(
+                    title: NSLocalizedString("Failed to stop the VPN tunnel", comment: ""),
+                    message: error.errorChainDescription,
+                    preferredStyle: .alert
+                )
+                alertController.addAction(
+                    UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                )
 
-                self.alertPresenter.enqueue(presentation.alertController, presentingController: self)
+                self.alertPresenter.enqueue(alertController, presentingController: self)
             }
         }
     }

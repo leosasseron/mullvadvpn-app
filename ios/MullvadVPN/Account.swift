@@ -91,18 +91,19 @@ class Account {
     /// Perform the login and save the account token along with expiry (if available) to the
     /// application preferences.
     func login(with accountToken: String, completionHandler: @escaping (Result<Date, Error>) -> Void) {
-        let urlSessionTask = rpc.getAccountExpiry(accountToken: accountToken).dataTask { (rpcResult) in
-            DispatchQueue.main.async {
-                switch rpcResult {
-                case .success(let expiry):
-                    self.setupTunnel(accountToken: accountToken, expiry: expiry) { (result) in
-                        completionHandler(result.map { expiry })
+        let urlSessionTask = rpc.getAccountExpiry(accountToken: accountToken)
+            .dataTask { (rpcResult) in
+                DispatchQueue.main.async {
+                    switch rpcResult {
+                    case .success(let expiry):
+                        self.setupTunnel(accountToken: accountToken, expiry: expiry) { (result) in
+                            completionHandler(result.map { expiry })
+                        }
+
+                    case .failure(let error):
+                        completionHandler(.failure(.verifyAccount(error)))
                     }
-                    
-                case .failure(let error):
-                    completionHandler(.failure(.verifyAccount(error)))
                 }
-            }
         }
 
         urlSessionTask?.resume()

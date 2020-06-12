@@ -48,6 +48,17 @@ extension PacketTunnelIpcHandler {
 
         /// A failure to process the request
         case processing(Swift.Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .encoding:
+                return "Encoding failure"
+            case .decoding:
+                return "Decoding failure"
+            case .processing:
+                return "Request handling failure"
+            }
+        }
     }
 
     static func decodeRequest(messageData: Data) -> Result<PacketTunnelRequest, Error> {

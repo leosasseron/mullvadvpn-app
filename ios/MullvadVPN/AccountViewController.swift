@@ -236,9 +236,16 @@ class AccountViewController: UIViewController {
                             sender: self)
 
                     case .failure(let error):
-                        let errorPresentation = AccountErrorPresentation(context: .logout, cause: error)
+                        let alertController = UIAlertController(
+                            title: NSLocalizedString("Failed to log out", comment: ""),
+                            message: error.errorChainDescription,
+                            preferredStyle: .alert
+                        )
+                        alertController.addAction(
+                            UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                        )
 
-                        self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
+                        self.alertPresenter.enqueue(alertController, presentingController: self)
                     }
                 }
             }
@@ -283,9 +290,16 @@ class AccountViewController: UIViewController {
                 guard let self = self else { return }
 
                 if case .failure(let error) = completion {
-                    let errorPresentation = AppStorePaymentErrorPresentation(context: .purchase, cause: error)
+                    let alertController = UIAlertController(
+                        title: NSLocalizedString("Cannot complete the payment", comment: ""),
+                        message: error.errorChainDescription,
+                        preferredStyle: .alert
+                    )
+                    alertController.addAction(
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                    )
 
-                    self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
+                    self.alertPresenter.enqueue(alertController, presentingController: self)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .purchase)
@@ -301,9 +315,16 @@ class AccountViewController: UIViewController {
                 guard let self = self else { return }
 
                 if case .failure(let error) = completion {
-                    let errorPresentation = AppStorePaymentErrorPresentation(context: .restorePurchases, cause: error)
+                    let alertController = UIAlertController(
+                        title: NSLocalizedString("Cannot restore purchases", comment: ""),
+                        message: error.errorChainDescription,
+                        preferredStyle: .alert
+                    )
+                    alertController.addAction(
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                    )
 
-                    self.alertPresenter.enqueue(errorPresentation.alertController, presentingController: self)
+                    self.alertPresenter.enqueue(alertController, presentingController: self)
                 }
                 }, receiveValue: { [weak self] (response) in
                     self?.showTimeAddedConfirmationAlert(with: response, context: .restoration)
