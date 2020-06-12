@@ -157,7 +157,7 @@ class ConnectViewController: UIViewController,
                         preferredStyle: .alert
                     )
                     alertController.addAction(
-                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
                     )
 
                     self.alertPresenter.enqueue(alertController, presentingController: self)
@@ -177,7 +177,7 @@ class ConnectViewController: UIViewController,
                     preferredStyle: .alert
                 )
                 alertController.addAction(
-                    UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                    UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
                 )
 
                 self.alertPresenter.enqueue(alertController, presentingController: self)

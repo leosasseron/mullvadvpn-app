@@ -122,7 +122,6 @@ extension Account.Error: DisplayChainedError {
 
 }
 
-
 extension AppStorePaymentManager.Error: DisplayChainedError {
     var errorChainDescription: String? {
         switch self {
@@ -147,7 +146,7 @@ extension AppStoreReceipt.Error: DisplayChainedError {
     var errorChainDescription: String? {
         switch self {
         case .doesNotExist:
-            return NSLocalizedString("AppStore does not exist", comment: "")
+            return NSLocalizedString("AppStore receipt does not exist", comment: "")
 
         case .io(let readError):
             return String(format: NSLocalizedString("Read error: %@", comment: ""),

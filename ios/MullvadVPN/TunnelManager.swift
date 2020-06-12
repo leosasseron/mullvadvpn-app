@@ -10,28 +10,10 @@ import Foundation
 import NetworkExtension
 import os
 
-enum TunnelIpcRequestError: ChainedError {
-    /// IPC is not set yet
-    case missingIpc
-
-    /// A failure to submit or handle the IPC request
-    case send(PacketTunnelIpc.Error)
-
-    var errorDescription: String? {
-        switch self {
-        case .missingIpc:
-            return "IPC is not initialized yet"
-
-        case .send:
-            return "Failure to send an IPC request"
-        }
-    }
-}
-
 enum MapConnectionStatusError: ChainedError {
     /// A failure to send a subsequent IPC request to collect more information, such as tunnel
     /// connection info.
-    case ipcRequest(TunnelIpcRequestError)
+    case ipcRequest(PacketTunnelIpc.Error)
 
     /// A failure to map the status because the unknown variant of `NEVPNStatus` was given.
     case unknownStatus(NEVPNStatus)
@@ -241,11 +223,7 @@ class TunnelManager {
 
     // MARK: - Internal variables
 
-    /// A queue used for dispatching tunnel related jobs that require mutual exclusion
-    private let exclusivityQueue = DispatchQueue(label: "net.mullvad.vpn.tunnel-manager.exclusivity-queue")
-
-    /// A queue used for access synchronization to the TunnelManager members
-    private let executionQueue = DispatchQueue(label: "net.mullvad.vpn.tunnel-manager.execution-queue")
+    private let dispatchQueue = DispatchQueue(label: "net.mullvad.MullvadVPN.TunnelManager")
 
     private let rpc = MullvadRpc.withEphemeralURLSession()
     private var tunnelProvider: TunnelProviderManagerType?
@@ -311,7 +289,7 @@ class TunnelManager {
                 if let error = error {
                     finish(.failure(.loadAllVPNConfigurations(error)))
                 } else {
-                    if let accountToken = accountToken {
+                    if let accountToken = self.accountToken {
                         // Migrate the tunnel settings if needed
                         self.migrateTunnelSettings(accountToken: accountToken)
 
@@ -370,8 +348,8 @@ class TunnelManager {
                 self.loadPublicKey(accountToken: accountToken)
             }
 
-            if let status = self.tunnelProvider?.connection.status {
-                self.updateTunnelState(connectionStatus: status) {
+            if let tunnelIpc = self.tunnelIpc, let status = self.tunnelProvider?.connection.status {
+                self.updateTunnelState(tunnelIpc: tunnelIpc, connectionStatus: status) {
                     finish()
                 }
             } else {
@@ -410,8 +388,7 @@ class TunnelManager {
 
             switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
             case .success(let keychainEntry):
-                let tunnelSettings = keychainEntry.tunnelConfiguration
-                let interfaceSettings = tunnelSettings.interface
+                let interfaceSettings = keychainEntry.tunnelSettings.interface
 
                 // Push wireguard key if addresses were not received yet
                 if interfaceSettings.addresses.isEmpty {
@@ -513,7 +490,7 @@ class TunnelManager {
             let removeFromKeychainAndServer = {
                 switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
                 case .success(let keychainEntry):
-                    let publicKey = keychainEntry.tunnelConfiguration
+                    let publicKey = keychainEntry.tunnelSettings
                         .interface
                         .privateKey
                         .publicKey
@@ -590,7 +567,7 @@ class TunnelManager {
             let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
             switch result {
             case .success(let keychainEntry):
-                let publicKey = keychainEntry.tunnelConfiguration.interface
+                let publicKey = keychainEntry.tunnelSettings.interface
                     .privateKey
                     .publicKey.rawRepresentation
 
@@ -630,7 +607,7 @@ class TunnelManager {
             switch result {
             case .success(let keychainEntry):
                 let newPrivateKey = WireguardPrivateKey()
-                let oldPublicKey = keychainEntry.tunnelConfiguration.interface
+                let oldPublicKey = keychainEntry.tunnelSettings.interface
                     .privateKey
                     .publicKey
 
@@ -644,17 +621,21 @@ class TunnelManager {
                         // Save new public key
                         self.publicKey = newPrivateKey.publicKey
 
-                        self.reloadPacketTunnelSettings { (ipcResult) in
-                            switch ipcResult {
-                            case .success:
-                                finish(.success(()))
+                        if let tunnelIpc = self.tunnelIpc {
+                            tunnelIpc.reloadTunnelSettings { (ipcResult) in
+                                switch ipcResult {
+                                case .success:
+                                    finish(.success(()))
 
-                            case .failure(let error):
-                                // Ignore Packet Tunnel IPC errors but log them
-                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
+                                case .failure(let error):
+                                    // Ignore Packet Tunnel IPC errors but log them
+                                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
 
-                                finish(.success(()))
+                                    finish(.success(()))
+                                }
                             }
+                        } else {
+                            finish(.success(()))
                         }
 
                     case .failure(let error):
@@ -686,12 +667,16 @@ class TunnelManager {
 
                 switch updateResult {
                 case .success:
-                    self.reloadPacketTunnelSettings { (ipcResult) in
-                        // Ignore Packet Tunnel IPC errors but log them
-                        if case .failure(let error) = ipcResult {
-                            os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
-                        }
+                    if let tunnelIpc = self.tunnelIpc {
+                        tunnelIpc.reloadTunnelSettings { (ipcResult) in
+                            // Ignore Packet Tunnel IPC errors but log them
+                            if case .failure(let error) = ipcResult {
+                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
+                            }
 
+                            finish(.success(()))
+                        }
+                    } else {
                         finish(.success(()))
                     }
 
@@ -718,8 +703,8 @@ class TunnelManager {
                 let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
 
                 switch result {
-                case .success(let tunnelSettings):
-                    return .success(tunnelSettings.tunnelConfiguration.relayConstraints)
+                case .success(let keychainEntry):
+                    return .success(keychainEntry.tunnelSettings.relayConstraints)
 
                 case .failure(let error):
                     // Return default constraints if the config is not found in Keychain
@@ -787,17 +772,11 @@ class TunnelManager {
 
     // MARK: - Operation management
 
-    private lazy var operationQueue: OperationQueue = {
-        let operationQueue = OperationQueue()
-        operationQueue.name = "net.mullvad.vpn.tunnel-manager.operation-queue"
-
-        return operationQueue
-    }()
+    private let operationQueue = OperationQueue()
     private var lastExclusiveOperation: Operation?
-    private let operationLock = NSLock()
 
     private func addExclusiveOperation(_ operation: Operation) {
-        self.operationLock.withCriticalBlock {
+        self.stateLock.withCriticalBlock {
             if let dependency = self.lastExclusiveOperation {
                 operation.addDependency(dependency)
             }
@@ -808,31 +787,6 @@ class TunnelManager {
 
     // MARK: - Private
 
-    /// Ask Packet Tunnel process to return the current tunnel connection info
-    private func getTunnelConnectionInfo(completionHandler: @escaping (Result<TunnelConnectionInfo, TunnelIpcRequestError>) -> Void) {
-        if let tunnelIpc = tunnelIpc {
-            tunnelIpc.getTunnelInformation { (result) in
-                completionHandler(result.mapError({ (ipcError) -> TunnelIpcRequestError in
-                    return TunnelIpcRequestError.send(ipcError)
-                }))
-            }
-        } else {
-            completionHandler(.failure(.missingIpc))
-        }
-    }
-
-    private func reloadPacketTunnelSettings(completionHandler: @escaping (Result<(), TunnelIpcRequestError>) -> Void) {
-        if let tunnelIpc = tunnelIpc {
-            tunnelIpc.reloadTunnelSettings { (result) in
-                completionHandler(result.mapError({ (ipcError) -> TunnelIpcRequestError in
-                    return TunnelIpcRequestError.send(ipcError)
-                }))
-            }
-        } else {
-            completionHandler(.failure(.missingIpc))
-        }
-    }
-
     /// Set the instance of the active tunnel and add the tunnel status observer
     private func setTunnelProvider(tunnelProvider: TunnelProviderManagerType, completionHandler: @escaping () -> Void) {
         guard self.tunnelProvider != tunnelProvider else {
@@ -840,15 +794,14 @@ class TunnelManager {
             return
         }
 
-        let connection = tunnelProvider.connection
-
         // Save the new active tunnel provider
         self.tunnelProvider = tunnelProvider
 
         // Set up tunnel IPC
-        if let session = connection as? VPNTunnelProviderSessionProtocol {
-            self.tunnelIpc = PacketTunnelIpc(session: session)
-        }
+        let connection = tunnelProvider.connection
+        let session = connection as! VPNTunnelProviderSessionProtocol
+        let tunnelIpc = PacketTunnelIpc(session: session)
+        self.tunnelIpc = tunnelIpc
 
         // Register for tunnel connection status changes
         unregisterConnectionObserver()
@@ -861,7 +814,7 @@ class TunnelManager {
 
                 if let status = connection?.status {
                     let operation = AsyncBlockOperation { (finish) in
-                        self.updateTunnelState(connectionStatus: status) {
+                        self.updateTunnelState(tunnelIpc: tunnelIpc, connectionStatus: status) {
                             finish()
                         }
                     }
@@ -871,7 +824,9 @@ class TunnelManager {
         }
 
         // Update the existing connection status
-        updateTunnelState(connectionStatus: connection.status, completionHandler: completionHandler)
+        updateTunnelState(tunnelIpc: tunnelIpc,
+                          connectionStatus: connection.status,
+                          completionHandler: completionHandler)
     }
 
     private func unregisterConnectionObserver() {
@@ -884,7 +839,7 @@ class TunnelManager {
     private func loadPublicKey(accountToken: String) {
         switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
         case .success(let entry):
-            self.publicKey = entry.tunnelConfiguration.interface.privateKey.publicKey
+            self.publicKey = entry.tunnelSettings.interface.privateKey.publicKey
 
         case .failure(let error):
             os_log(.error, "%{public}s", error.displayChain(message: "Failed to load the public key"))
@@ -970,10 +925,10 @@ class TunnelManager {
     }
 
     /// Initiates the `tunnelState` update
-    private func updateTunnelState(connectionStatus: NEVPNStatus, completionHandler: @escaping () -> Void) {
+    private func updateTunnelState(tunnelIpc: PacketTunnelIpc, connectionStatus: NEVPNStatus, completionHandler: @escaping () -> Void) {
         os_log(.default, "VPN Status: %{public}s", "\(connectionStatus)")
 
-        mapTunnelState(connectionStatus: connectionStatus) { (result) in
+        mapTunnelState(tunnelIpc: tunnelIpc, connectionStatus: connectionStatus) { (result) in
             switch result {
             case .success(let tunnelState):
                 os_log(.default, "Set tunnel state: %{public}s", "\(tunnelState)")
@@ -991,10 +946,10 @@ class TunnelManager {
     /// Maps `NEVPNStatus` to `TunnelState`.
     /// Collects the `TunnelConnectionInfo` from the tunnel via IPC if needed before assigning the
     /// `tunnelState`
-    private func mapTunnelState(connectionStatus: NEVPNStatus, completionHandler: @escaping (Result<TunnelState, MapConnectionStatusError>) -> Void) {
+    private func mapTunnelState(tunnelIpc: PacketTunnelIpc, connectionStatus: NEVPNStatus, completionHandler: @escaping (Result<TunnelState, MapConnectionStatusError>) -> Void) {
         switch connectionStatus {
         case .connected:
-            getTunnelConnectionInfo { (result) in
+            tunnelIpc.getTunnelInformation { (result) in
                 let result = result.map { TunnelState.connected($0) }
                     .mapError { MapConnectionStatusError.ipcRequest($0) }
 
@@ -1017,7 +972,7 @@ class TunnelManager {
                 self.loadPublicKey(accountToken: accountToken)
             }
 
-            getTunnelConnectionInfo { (result) in
+            tunnelIpc.getTunnelInformation { (result) in
                 let result = result.map { TunnelState.reconnecting($0) }
                     .mapError { MapConnectionStatusError.ipcRequest($0) }
 
@@ -1035,7 +990,7 @@ class TunnelManager {
     /// Retrieve the existing TunnelConfiguration or create a new one
     private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelSettings, TunnelManager.Error> {
         TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
-            .map { $0.tunnelConfiguration }
+            .map { $0.tunnelSettings }
             .flatMapError { (error) -> Result<TunnelSettings, TunnelManager.Error> in
                 // Return default tunnel configuration if the config is not found in Keychain
                 if case .lookupEntry(.itemNotFound) = error {

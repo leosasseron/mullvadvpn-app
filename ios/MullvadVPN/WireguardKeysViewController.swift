@@ -98,15 +98,6 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
 
         self.copyToPasteboardWork?.cancel()
         self.copyToPasteboardWork = dispatchWork
-
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.main)
-        timer.setEventHandler { [weak self] () -> Void in
-            let publicKey = TunnelManager.shared.publicKey
-
-            self?.updatePublicKey(publicKey: publicKey, animated: true)
-        }
-        timer.schedule(deadline: .now() + .seconds(3))
-        timer.activate()
     }
 
     @IBAction func handleRegenerateKey(_ sender: Any) {
@@ -190,7 +181,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
                         preferredStyle: .alert
                     )
                     alertController.addAction(
-                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
                     )
 
                     self.alertPresenter.enqueue(alertController, presentingController: self)
@@ -216,7 +207,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
                         preferredStyle: .alert
                     )
                     alertController.addAction(
-                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .default)
+                        UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
                     )
 
                     os_log(.error, "%{public}s",

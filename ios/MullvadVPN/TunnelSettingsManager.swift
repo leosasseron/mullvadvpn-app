@@ -71,7 +71,7 @@ extension TunnelSettingsManager {
 
     struct KeychainEntry {
         let accountToken: String
-        let tunnelConfiguration: TunnelSettings
+        let tunnelSettings: TunnelSettings
     }
 
     static func load(searchTerm: KeychainSearchTerm) -> Result<KeychainEntry> {
@@ -86,7 +86,7 @@ extension TunnelSettingsManager {
                 let data = attributes.valueData!
 
                 return Self.decode(data: data)
-                    .map { KeychainEntry(accountToken: account, tunnelConfiguration: $0) }
+                    .map { KeychainEntry(accountToken: account, tunnelSettings: $0) }
         }
     }
 

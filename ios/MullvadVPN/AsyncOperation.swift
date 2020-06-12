@@ -116,19 +116,29 @@ protocol OutputOperation {
     func finish(with output: Output)
 }
 
-class AsyncBlockOutputOperation<Output>: AsyncOperation, OutputOperation {
+class AsyncOutputOperation<Output>: AsyncOperation, OutputOperation {
+    private var _output: Output?
+
+    var output: Output? {
+        return stateLock.withCriticalBlock { self._output }
+    }
+
+    func finish(with output: Output) {
+        stateLock.withCriticalBlock {
+            self._output = output
+            self.finish()
+        }
+    }
+}
+
+class AsyncBlockOutputOperation<Output>: AsyncOutputOperation<Output> {
 
     private enum Executor {
         case callback((@escaping (Output) -> Void) -> Void)
         case transform(() -> Output)
     }
 
-    var output: Output? {
-        return stateLock.withCriticalBlock { self._output }
-    }
-
     private let executor: Executor
-    private var _output: Output?
 
     private init(executor: Executor) {
         self.executor = executor
@@ -151,13 +161,6 @@ class AsyncBlockOutputOperation<Output>: AsyncOperation, OutputOperation {
 
         case .transform(let block):
             self.finish(with: block())
-        }
-    }
-
-    func finish(with output: Output) {
-        stateLock.withCriticalBlock {
-            self._output = output
-            self.finish()
         }
     }
 

@@ -8,7 +8,6 @@
 
 import Foundation
 import Network
-import Combine
 
 /// API server URL
 private let kMullvadAPIURL = URL(string: "https://api.mullvad.net/rpc/")!
@@ -217,17 +216,6 @@ extension MullvadRpc {
         fileprivate init(session: URLSession, request: JsonRpcRequest) {
             self.session = session
             self.request = request
-        }
-
-        var publisher: AnyPublisher<Response, MullvadRpc.Error> {
-            return makeURLRequest().publisher
-                .flatMap { (urlRequest) in
-                    return self.session.dataTaskPublisher(for: urlRequest)
-                        .mapError { MullvadRpc.Error.network($0) }
-                        .flatMap { (data, httpResponse) in
-                            return Self.decodeResponse(data).publisher
-                    }
-            }.eraseToAnyPublisher()
         }
 
         func dataTask(completionHandler: @escaping DataTaskCompletionHandler) -> URLSessionDataTask?

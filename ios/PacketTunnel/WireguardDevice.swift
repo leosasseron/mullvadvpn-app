@@ -177,7 +177,7 @@ class WireguardDevice {
         }
     }
 
-    func setConfig(configuration newConfiguration: WireguardConfiguration, completionHandler: @escaping (Result<(), Error>) -> Void) {
+    func setConfiguration(_ newConfiguration: WireguardConfiguration, completionHandler: @escaping (Result<(), Error>) -> Void) {
         workQueue.async {
             if let handle = self.wireguardHandle {
                 let newResolvedConfiguration = Self.resolveConfiguration(newConfiguration)
