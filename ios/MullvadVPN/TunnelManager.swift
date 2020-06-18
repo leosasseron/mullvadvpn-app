@@ -444,19 +444,50 @@ class TunnelManager {
     }
 
     func setAccount(accountToken: String, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation { () -> Result<(), TunnelManager.Error> in
+        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
             let result = self.makeTunnelConfiguration(accountToken: accountToken)
 
             switch result {
             case .success(let tunnelSettings):
-                // Save the last known public key
-                self.publicKey = tunnelSettings.interface.privateKey.publicKey
-                self.accountToken = accountToken
+                let interfaceSettings = tunnelSettings.interface
 
-                return .success(())
+                let confirmSetAccount = {
+                    // Save the last known public key
+                    self.publicKey = tunnelSettings.interface.privateKey.publicKey
+                    self.accountToken = accountToken
+                }
+
+                // Push wireguard key if addresses were not received yet
+                if interfaceSettings.addresses.isEmpty {
+                    self.pushWireguardKeyAndUpdateSettings(
+                        accountToken: accountToken,
+                        publicKey: interfaceSettings.privateKey.publicKey) { (result) in
+                            let result = result.flatMapError { (error) -> Result<(), TunnelManager.Error> in
+                                // We'll do the second attempt to push the key before establishing
+                                // the tunnel
+                                if case .pushWireguardKey = error {
+                                    os_log(.error, "%{public}s", error.displayChain())
+
+                                    return .success(())
+                                } else {
+                                    return .failure(error)
+                                }
+                            }
+
+                            if case .success = result {
+                                confirmSetAccount()
+                            }
+
+                            finish(result)
+                    }
+                } else {
+                    confirmSetAccount()
+                    finish(.success(()))
+                }
+
 
             case .failure(let error):
-                return .failure(error)
+                finish(.failure(error))
             }
         }
 
