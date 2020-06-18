@@ -33,7 +33,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                     fatalError(error.displayChain(message: "Failed to load the tunnel for account"))
                 }
 
-                let rootViewController = self.mainStoryboard.instantiateViewController(identifier: ViewControllerIdentifier.root.rawValue) as! RootContainerViewController
+                let rootViewController = self.mainStoryboard.instantiateViewController(withIdentifier: ViewControllerIdentifier.root.rawValue) as! RootContainerViewController
 
                 let showMainController = { (_ animated: Bool) in
                     self.showMainController(in: rootViewController, animated: animated) {

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 52;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -134,6 +134,7 @@
 		58F3C09A249B9852003E76BE /* x25519.c in Sources */ = {isa = PBXBuildFile; fileRef = 58F3C098249B978C003E76BE /* x25519.c */; };
 		58F3C09C249B99DD003E76BE /* Curve25519.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F3C09B249B99DD003E76BE /* Curve25519.swift */; };
 		58F3C09D249B99DD003E76BE /* Curve25519.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F3C09B249B99DD003E76BE /* Curve25519.swift */; };
+		58F3C0A0249BBF1E003E76BE /* DiffableDataSources in Frameworks */ = {isa = PBXBuildFile; productRef = 58F3C09F249BBF1E003E76BE /* DiffableDataSources */; };
 		58F840AF2464382C0044E708 /* KeychainItemRevision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F840AE2464382C0044E708 /* KeychainItemRevision.swift */; };
 		58F840B02464382C0044E708 /* KeychainItemRevision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F840AE2464382C0044E708 /* KeychainItemRevision.swift */; };
 		58F840B22464491D0044E708 /* ChainedError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F840B12464491D0044E708 /* ChainedError.swift */; };
@@ -321,6 +322,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				58F3C0A0249BBF1E003E76BE /* DiffableDataSources in Frameworks */,
 				586BD68422B7BBE400BB7F9F /* NetworkExtension.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -572,6 +574,9 @@
 				58CE5E80224146470008646E /* PBXTargetDependency */,
 			);
 			name = MullvadVPN;
+			packageProductDependencies = (
+				58F3C09F249BBF1E003E76BE /* DiffableDataSources */,
+			);
 			productName = MullvadVPN;
 			productReference = 58CE5E60224146200008646E /* MullvadVPN.app */;
 			productType = "com.apple.product-type.application";
@@ -665,6 +670,9 @@
 				Base,
 			);
 			mainGroup = 58CE5E57224146200008646E;
+			packageReferences = (
+				58F3C09E249BBF1E003E76BE /* XCRemoteSwiftPackageReference "DiffableDataSources" */,
+			);
 			productRefGroup = 58CE5E61224146200008646E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -1359,6 +1367,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		58F3C09E249BBF1E003E76BE /* XCRemoteSwiftPackageReference "DiffableDataSources" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ra1028/DiffableDataSources.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		58F3C09F249BBF1E003E76BE /* DiffableDataSources */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 58F3C09E249BBF1E003E76BE /* XCRemoteSwiftPackageReference "DiffableDataSources" */;
+			productName = DiffableDataSources;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 58CE5E58224146200008646E /* Project object */;
 }
