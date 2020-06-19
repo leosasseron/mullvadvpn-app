@@ -22,80 +22,7 @@
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="2sf-Y1-Ntj" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="-1962" y="27"/>
-        </scene>
-        <!--Root Container View Controller-->
-        <scene sceneID="euw-TF-Dd7">
-            <objects>
-                <viewController storyboardIdentifier="Root" id="aW6-TO-kM3" customClass="RootContainerViewController" customModule="MullvadVPN" customModuleProvider="target" sceneMemberID="viewController">
-                    <view key="view" contentMode="scaleToFill" id="hQl-Sx-c1J">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <subviews>
-                            <view contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" translatesAutoresizingMaskIntoConstraints="NO" id="LEj-gs-rBL">
-                                <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
-                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-                                <viewLayoutGuide key="safeArea" id="Uo1-pA-GWn"/>
-                            </view>
-                            <view contentMode="scaleToFill" insetsLayoutMarginsFromSafeArea="NO" translatesAutoresizingMaskIntoConstraints="NO" id="cw4-px-5hC">
-                                <rect key="frame" x="0.0" y="0.0" width="375" height="93"/>
-                                <subviews>
-                                    <imageView userInteractionEnabled="NO" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="LogoIcon" translatesAutoresizingMaskIntoConstraints="NO" id="cKg-hE-JsS">
-                                        <rect key="frame" x="12" y="34.5" width="44" height="44"/>
-                                        <constraints>
-                                            <constraint firstAttribute="width" secondItem="cKg-hE-JsS" secondAttribute="height" multiplier="1:1" id="jln-Ze-Hhl"/>
-                                            <constraint firstAttribute="width" constant="44" id="u6D-kY-AyW"/>
-                                        </constraints>
-                                    </imageView>
-                                    <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="uXv-Tf-PET">
-                                        <rect key="frame" x="335" y="44.5" width="24" height="24"/>
-                                        <accessibility key="accessibilityConfiguration" identifier="SettingsButton"/>
-                                        <state key="normal" image="IconSettings"/>
-                                        <connections>
-                                            <segue destination="Kqv-qu-mfF" kind="presentation" identifier="ShowSettings" id="cxu-NC-VeP"/>
-                                        </connections>
-                                    </button>
-                                    <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="MULLVAD VPN" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="dqy-A0-TdV">
-                                        <rect key="frame" x="64" y="42" width="168" height="29"/>
-                                        <fontDescription key="fontDescription" type="boldSystem" pointSize="24"/>
-                                        <color key="textColor" white="1" alpha="0.80000000000000004" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-                                        <nil key="highlightedColor"/>
-                                    </label>
-                                </subviews>
-                                <constraints>
-                                    <constraint firstAttribute="trailingMargin" secondItem="uXv-Tf-PET" secondAttribute="trailing" id="1LM-Tg-1Kr"/>
-                                    <constraint firstItem="cKg-hE-JsS" firstAttribute="centerY" secondItem="dqy-A0-TdV" secondAttribute="centerY" id="IT0-VO-msz"/>
-                                    <constraint firstAttribute="bottomMargin" secondItem="dqy-A0-TdV" secondAttribute="bottom" constant="22" id="YTk-xg-wIk"/>
-                                    <constraint firstItem="uXv-Tf-PET" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="dqy-A0-TdV" secondAttribute="trailing" constant="8" symbolic="YES" id="ZEb-xZ-1ga"/>
-                                    <constraint firstItem="uXv-Tf-PET" firstAttribute="centerY" secondItem="dqy-A0-TdV" secondAttribute="centerY" id="gCl-OS-ONw"/>
-                                    <constraint firstItem="cKg-hE-JsS" firstAttribute="leading" secondItem="cw4-px-5hC" secondAttribute="leadingMargin" id="hGJ-yd-hnp"/>
-                                    <constraint firstItem="dqy-A0-TdV" firstAttribute="top" secondItem="cw4-px-5hC" secondAttribute="topMargin" constant="22" id="mMF-ha-mRO"/>
-                                    <constraint firstItem="dqy-A0-TdV" firstAttribute="leading" secondItem="cKg-hE-JsS" secondAttribute="trailing" constant="8" id="q8s-25-ASt"/>
-                                </constraints>
-                                <edgeInsets key="layoutMargins" top="20" left="12" bottom="0.0" right="16"/>
-                            </view>
-                        </subviews>
-                        <color key="backgroundColor" name="Primary"/>
-                        <constraints>
-                            <constraint firstItem="LEj-gs-rBL" firstAttribute="top" secondItem="hQl-Sx-c1J" secondAttribute="top" id="22p-PG-rk7"/>
-                            <constraint firstItem="LEj-gs-rBL" firstAttribute="leading" secondItem="hQl-Sx-c1J" secondAttribute="leading" id="Ehw-ts-TGl"/>
-                            <constraint firstAttribute="trailing" secondItem="cw4-px-5hC" secondAttribute="trailing" id="RE4-jS-w03"/>
-                            <constraint firstAttribute="bottom" secondItem="LEj-gs-rBL" secondAttribute="bottom" id="hXO-xN-pdV"/>
-                            <constraint firstItem="cw4-px-5hC" firstAttribute="top" secondItem="hQl-Sx-c1J" secondAttribute="top" id="k5T-fl-TkJ"/>
-                            <constraint firstAttribute="trailing" secondItem="LEj-gs-rBL" secondAttribute="trailing" id="o8y-zm-Y1o"/>
-                            <constraint firstItem="cw4-px-5hC" firstAttribute="leading" secondItem="hQl-Sx-c1J" secondAttribute="leading" id="u7B-kz-QQZ"/>
-                        </constraints>
-                        <viewLayoutGuide key="safeArea" id="gDr-jW-ZhR"/>
-                    </view>
-                    <connections>
-                        <outlet property="headerBarSettingsButton" destination="uXv-Tf-PET" id="psX-Ij-AXM"/>
-                        <outlet property="headerBarView" destination="cw4-px-5hC" id="lBM-gg-xZq"/>
-                        <outlet property="transitionContainer" destination="LEj-gs-rBL" id="WHt-LX-Uwu"/>
-                    </connections>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="nyE-nN-nlq" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
-            <point key="canvasLocation" x="-431.19999999999999" y="26.53673163418291"/>
+            <point key="canvasLocation" x="-1306" y="27"/>
         </scene>
         <!--Login View Controller-->
         <scene sceneID="tne-QT-ifu">
@@ -365,7 +292,7 @@
             <objects>
                 <tableViewController id="SHd-a4-ewi" customClass="SettingsViewController" customModule="MullvadVPN" customModuleProvider="target" sceneMemberID="viewController">
                     <tableView key="view" clipsSubviews="YES" contentMode="scaleToFill" alwaysBounceVertical="YES" dataMode="prototypes" style="grouped" separatorStyle="default" rowHeight="-1" estimatedRowHeight="-1" sectionHeaderHeight="18" sectionFooterHeight="18" id="6Gz-UM-orK">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <color key="backgroundColor" name="Secondary"/>
                         <color key="tintColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
@@ -503,11 +430,11 @@
             <objects>
                 <viewController id="vAK-MJ-h3c" customClass="WireguardKeysViewController" customModule="MullvadVPN" customModuleProvider="target" sceneMemberID="viewController">
                     <view key="view" contentMode="scaleToFill" id="NHk-FR-Mwy">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <scrollView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" alwaysBounceVertical="YES" translatesAutoresizingMaskIntoConstraints="NO" id="fa2-zl-Fc4">
-                                <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
+                                <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                                 <subviews>
                                     <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="5VO-oQ-4jM" userLabel="Container">
                                         <rect key="frame" x="0.0" y="0.0" width="375" height="295.5"/>
@@ -739,11 +666,11 @@
             <objects>
                 <viewController id="ruh-Q2-P39" customClass="AccountViewController" customModule="MullvadVPN" customModuleProvider="target" sceneMemberID="viewController">
                     <view key="view" contentMode="scaleToFill" id="Qpl-bL-ZGl">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <scrollView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" alwaysBounceVertical="YES" translatesAutoresizingMaskIntoConstraints="NO" id="saE-dV-AgF">
-                                <rect key="frame" x="0.0" y="0.0" width="375" height="647"/>
+                                <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
                                 <subviews>
                                     <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="rkG-Xa-pEO" userLabel="Container">
                                         <rect key="frame" x="0.0" y="0.0" width="375" height="349.5"/>
@@ -948,7 +875,7 @@
                 <navigationController storyboardIdentifier="Settings" id="Kqv-qu-mfF" sceneMemberID="viewController">
                     <navigationItem key="navigationItem" id="7IR-NQ-qLb"/>
                     <navigationBar key="navigationBar" contentMode="scaleToFill" insetsLayoutMarginsFromSafeArea="NO" barStyle="black" largeTitles="YES" id="7PK-0x-byW" customClass="CustomNavigationBar" customModule="MullvadVPN" customModuleProvider="target">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="108"/>
+                        <rect key="frame" x="0.0" y="0.0" width="375" height="96"/>
                         <autoresizingMask key="autoresizingMask"/>
                         <color key="tintColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                     </navigationBar>
@@ -1083,7 +1010,7 @@
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="87X-aX-U9x" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
             </objects>
-            <point key="canvasLocation" x="-1207" y="27"/>
+            <point key="canvasLocation" x="-551" y="27"/>
         </scene>
         <!--Navigation Controller-->
         <scene sceneID="oT4-Ap-qrZ">
@@ -1136,31 +1063,31 @@
                         </view>
                         <prototypes>
                             <tableViewCell clipsSubviews="YES" contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" selectionStyle="default" indentationWidth="10" reuseIdentifier="Cell" id="aFz-H5-sPu" customClass="SelectLocationCell" customModule="MullvadVPN" customModuleProvider="target">
-                                <rect key="frame" x="0.0" y="173" width="375" height="43.5"/>
+                                <rect key="frame" x="0.0" y="173" width="375" height="43"/>
                                 <autoresizingMask key="autoresizingMask"/>
                                 <tableViewCellContentView key="contentView" opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="center" preservesSuperviewLayoutMargins="YES" insetsLayoutMarginsFromSafeArea="NO" tableViewCell="aFz-H5-sPu" id="6nQ-gT-vzf">
-                                    <rect key="frame" x="0.0" y="0.0" width="375" height="43.5"/>
+                                    <rect key="frame" x="0.0" y="0.0" width="375" height="43"/>
                                     <autoresizingMask key="autoresizingMask"/>
                                     <subviews>
                                         <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="5ag-N4-pUg" customClass="RelayStatusIndicatorView" customModule="MullvadVPN" customModuleProvider="target">
-                                            <rect key="frame" x="16" y="14" width="16" height="16"/>
+                                            <rect key="frame" x="16" y="13.5" width="16" height="16"/>
                                             <constraints>
                                                 <constraint firstAttribute="height" constant="16" id="QWj-hh-I3P"/>
                                                 <constraint firstAttribute="width" constant="16" id="TFV-yi-LXG"/>
                                             </constraints>
                                         </view>
                                         <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Label" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="y7o-0b-MUV">
-                                            <rect key="frame" x="44" y="11" width="42" height="21.5"/>
+                                            <rect key="frame" x="44" y="11" width="42" height="21"/>
                                             <fontDescription key="fontDescription" type="system" pointSize="17"/>
                                             <color key="textColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                             <nil key="highlightedColor"/>
                                         </label>
                                         <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="IconTick" translatesAutoresizingMaskIntoConstraints="NO" id="e1o-Bl-zd5">
-                                            <rect key="frame" x="12" y="10" width="24" height="24"/>
+                                            <rect key="frame" x="12" y="9.5" width="24" height="24"/>
                                             <color key="tintColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                         </imageView>
                                         <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="KaW-bN-I51">
-                                            <rect key="frame" x="311" y="0.0" width="64" height="43.5"/>
+                                            <rect key="frame" x="311" y="0.0" width="64" height="43"/>
                                             <accessibility key="accessibilityConfiguration" identifier="ExpandButton"/>
                                             <constraints>
                                                 <constraint firstAttribute="width" constant="64" id="UU3-Di-65E"/>
@@ -1455,7 +1382,6 @@
         <image name="DefaultButton" width="9" height="9"/>
         <image name="IconChevronDown" width="24" height="24"/>
         <image name="IconExtlink" width="16" height="16"/>
-        <image name="IconSettings" width="24" height="24"/>
         <image name="IconSuccess" width="60" height="60"/>
         <image name="IconTick" width="24" height="24"/>
         <image name="LogoIcon" width="253" height="253"/>

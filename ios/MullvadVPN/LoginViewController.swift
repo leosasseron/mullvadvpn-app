@@ -206,10 +206,10 @@ class LoginViewController: UIViewController, RootContainment {
             fallthrough
 
         case .success:
-            rootContainerController?.headerBarSettingsButton.isEnabled = false
+            rootContainerController?.setEnableSettingsButton(false)
 
         case .default, .failure:
-            rootContainerController?.headerBarSettingsButton.isEnabled = true
+            rootContainerController?.setEnableSettingsButton(true)
             createAccountButton.isEnabled = true
             activityIndicator.stopAnimating()
         }
@@ -257,7 +257,7 @@ class LoginViewController: UIViewController, RootContainment {
         } else if case .success = loginState {
             // Navigate to the main view after 1s delay
             DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(1)) {
-                self.rootContainerController?.headerBarSettingsButton.isEnabled = true
+                self.rootContainerController?.setEnableSettingsButton(true)
 
                 self.performSegue(withIdentifier: SegueIdentifier.Login.showConnect.rawValue,
                                   sender: self)

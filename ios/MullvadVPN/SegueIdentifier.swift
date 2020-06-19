@@ -12,11 +12,7 @@ import UIKit
 enum SegueIdentifier {}
 
 extension SegueIdentifier {
-
-    enum Root: String, SegueConvertible {
-        case showSettings = "ShowSettings"
-    }
-
+    
     enum Login: String, SegueConvertible {
         case showConnect = "ShowConnect"
     }
