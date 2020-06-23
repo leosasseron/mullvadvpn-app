@@ -52,17 +52,17 @@ class AutomaticKeyRotationManager {
     /// A dispatch queue used for synchronization
     private let dispatchQueue = DispatchQueue(label: "net.mullvad.vpn.key-manager", qos: .background)
 
-    /// An operation queue used for running key rotation tasks
-    private let operationQueue = OperationQueue()
-
     /// A timer source used to schedule a delayed key rotation
     private var timerSource: DispatchSourceTimer?
 
     /// Internal lock used for access synchronization to public members of this class
-    private let lock = NSLock()
+    private let stateLock = NSLock()
 
     /// Internal variable indicating that the key rotation has already started
     private var isAutomaticRotationEnabled = false
+
+    /// An URLSessionTask for replacing the key on server
+    private var urlSessionTask: URLSessionTask?
 
     /// A variable backing the `eventHandler` public property
     private var _eventHandler: ((KeyRotationResult) -> Void)?
@@ -70,12 +70,12 @@ class AutomaticKeyRotationManager {
     /// An event handler that's invoked when key rotation occurred
     var eventHandler: ((KeyRotationResult) -> Void)? {
         get {
-            lock.withCriticalBlock {
+            stateLock.withCriticalBlock {
                 self._eventHandler
             }
         }
         set {
-            lock.withCriticalBlock {
+            stateLock.withCriticalBlock {
                 self._eventHandler = newValue
             }
         }
@@ -85,7 +85,7 @@ class AutomaticKeyRotationManager {
         self.persistentKeychainReference = persistentKeychainReference
     }
 
-    func startAutomaticRotation() {
+    func startAutomaticRotation(completionHandler: @escaping () -> Void) {
         dispatchQueue.async {
             guard !self.isAutomaticRotationEnabled else { return }
 
@@ -93,33 +93,104 @@ class AutomaticKeyRotationManager {
 
             self.isAutomaticRotationEnabled = true
             self.performKeyRotation()
+
+            completionHandler()
         }
     }
 
-    func stopAutomaticRotation() {
+    func stopAutomaticRotation(completionHandler: @escaping () -> Void) {
         dispatchQueue.async {
             guard self.isAutomaticRotationEnabled else { return }
 
             os_log(.default, log: tunnelProviderLog, "Stop automatic key rotation")
 
             self.isAutomaticRotationEnabled = false
-            self.operationQueue.cancelAllOperations()
+
+            self.urlSessionTask?.cancel()
+            self.urlSessionTask = nil
+
             self.timerSource?.cancel()
+
+            completionHandler()
         }
     }
 
     private func performKeyRotation() {
-        let operation = RotateKeyOperation(rpc: rpc, persistentKeychainReference: persistentKeychainReference)
+        let result = TunnelSettingsManager.load(searchTerm: .persistentReference(persistentKeychainReference))
 
-        operation.completionBlock = {
-            self.dispatchQueue.async {
-                if let output = operation.output {
-                    self.didCompleteKeyRotation(result: output)
+        switch result {
+        case .success(let keychainEntry):
+            let currentPrivateKey = keychainEntry.tunnelSettings.interface.privateKey
+
+            if Self.shouldRotateKey(creationDate: currentPrivateKey.creationDate) {
+                let urlSessionTask = replaceKey(accountToken: keychainEntry.accountToken, oldPublicKey: currentPrivateKey.publicKey) { (result) in
+                    let result = result.map { (tunnelSettings) -> KeyRotationResult in
+                        let newPrivateKey = tunnelSettings.interface.privateKey
+
+                        return KeyRotationResult(
+                            isNew: true,
+                            creationDate: newPrivateKey.creationDate,
+                            publicKey: newPrivateKey.publicKey
+                        )
+                    }
+
+                    self.didCompleteKeyRotation(result: result)
                 }
+
+                self.urlSessionTask = urlSessionTask
+
+                urlSessionTask?.resume()
+            } else {
+                let event = KeyRotationResult(
+                    isNew: false,
+                    creationDate: currentPrivateKey.creationDate,
+                    publicKey: currentPrivateKey.publicKey
+                )
+
+                self.didCompleteKeyRotation(result: .success(event))
+            }
+
+        case .failure(let error):
+            self.didCompleteKeyRotation(result: .failure(.readTunnelSettings(error)))
+        }
+    }
+
+    private func replaceKey(
+        accountToken: String,
+        oldPublicKey: WireguardPublicKey,
+        completionHandler: @escaping (Result<TunnelSettings, Error>) -> Void) -> URLSessionTask?
+    {
+        let newPrivateKey = WireguardPrivateKey()
+
+        let request = rpc.replaceWireguardKey(
+            accountToken: accountToken,
+            oldPublicKey: oldPublicKey.rawRepresentation,
+            newPublicKey: newPrivateKey.publicKey.rawRepresentation
+        )
+
+        return request.dataTask { (result) in
+            self.dispatchQueue.async {
+                let updateResult = result.mapError { (error) -> Error in
+                    return .rpc(error)
+                }.flatMap { (addresses) -> Result<TunnelSettings, Error> in
+                    self.updateTunnelSettings(privateKey: newPrivateKey, addresses: addresses)
+                }
+                completionHandler(updateResult)
             }
         }
+    }
 
-        operationQueue.addOperation(operation)
+    private func updateTunnelSettings(privateKey: WireguardPrivateKey, addresses: WireguardAssociatedAddresses) -> Result<TunnelSettings, Error> {
+        let updateResult = TunnelSettingsManager.update(searchTerm: .persistentReference(self.persistentKeychainReference))
+            { (tunnelSettings) in
+                tunnelSettings.interface.privateKey = privateKey
+                tunnelSettings.interface.addresses = [
+                    addresses.ipv4Address,
+                    addresses.ipv6Address
+                ]
+        }
+
+        return updateResult.mapError { .updateTunnelSettings($0) }
     }
 
     private func didCompleteKeyRotation(result: Result<KeyRotationResult, Error>) {
@@ -133,7 +204,7 @@ class AutomaticKeyRotationManager {
                 eventHandler?(event)
             }
 
-            if let rotationDate = nextRotation(creationDate: event.creationDate) {
+            if let rotationDate = Self.nextRotation(creationDate: event.creationDate) {
                 let interval = rotationDate.timeIntervalSinceNow
 
                 os_log(.default, log: tunnelProviderLog,
@@ -148,7 +219,7 @@ class AutomaticKeyRotationManager {
             }
 
         case .failure(.rpc(.network(let urlError))) where urlError.code == .cancelled:
-            os_log(.default, log: tunnelProviderLog, "Key rotation was cancelled.")
+            os_log(.default, log: tunnelProviderLog, "Key rotation was cancelled")
             break
 
         case .failure(let error):
@@ -176,113 +247,14 @@ class AutomaticKeyRotationManager {
 
         self.timerSource = timerSource
     }
-}
 
-private class RotateKeyOperation: AsyncOutputOperation<Result<KeyRotationResult, AutomaticKeyRotationManager.Error>> {
-    typealias Error = AutomaticKeyRotationManager.Error
-
-    private let rpc: MullvadRpc
-    private let persistentKeychainReference: Data
-    private var urlSessionTask: URLSessionTask?
-
-    init(rpc: MullvadRpc, persistentKeychainReference: Data) {
-        self.rpc = rpc
-        self.persistentKeychainReference = persistentKeychainReference
-
-        super.init()
+    private class func nextRotation(creationDate: Date) -> Date? {
+        return Calendar.current.date(byAdding: .day, value: kRotationInterval, to: creationDate)
     }
 
-    override func main() {
-        let result = TunnelSettingsManager
-            .load(searchTerm: .persistentReference(persistentKeychainReference))
-
-        switch result {
-        case .success(let keychainEntry):
-            let currentPrivateKey = keychainEntry.tunnelSettings.interface.privateKey
-
-            if shouldRotateKey(creationDate: currentPrivateKey.creationDate) {
-                let urlSessionTask = replaceKeyTask(
-                    accountToken: keychainEntry.accountToken,
-                    oldPublicKey: currentPrivateKey.publicKey
-                ) { (result) in
-                    let result = result.map { (tunnelSettings) -> KeyRotationResult in
-                        let newPrivateKey = tunnelSettings.interface.privateKey
-
-                        return KeyRotationResult(
-                            isNew: true,
-                            creationDate: newPrivateKey.creationDate,
-                            publicKey: newPrivateKey.publicKey
-                        )
-                    }
-
-                    self.finish(with: result)
-                }
-
-                self.urlSessionTask = urlSessionTask
-            } else {
-                let event = KeyRotationResult(
-                    isNew: false,
-                    creationDate: currentPrivateKey.creationDate,
-                    publicKey: currentPrivateKey.publicKey
-                )
-
-                finish(with: .success(event))
-            }
-
-        case .failure(let error):
-            finish(with: .failure(.readTunnelSettings(error)))
-        }
+    private class func shouldRotateKey(creationDate: Date) -> Bool {
+        return nextRotation(creationDate: creationDate)
+            .map { $0 <= Date() } ?? false
     }
 
-    override func cancel() {
-        super.cancel()
-
-        urlSessionTask?.cancel()
-    }
-
-    private func replaceKeyTask(
-        accountToken: String,
-        oldPublicKey: WireguardPublicKey,
-        completionHandler: @escaping (Result<TunnelSettings, Error>) -> Void) -> URLSessionTask?
-    {
-        let newPrivateKey = WireguardPrivateKey()
-
-        let request = rpc.replaceWireguardKey(
-            accountToken: accountToken,
-            oldPublicKey: oldPublicKey.rawRepresentation,
-            newPublicKey: newPrivateKey.publicKey.rawRepresentation
-        )
-
-        return request.dataTask { (result) in
-            let updateResult = result.mapError { (error) -> Error in
-                return .rpc(error)
-            }.flatMap { (addresses) -> Result<TunnelSettings, Error> in
-                self.updateTunnelSettings(privateKey: newPrivateKey, addresses: addresses)
-            }
-            completionHandler(updateResult)
-        }
-    }
-
-    private func updateTunnelSettings(privateKey: WireguardPrivateKey, addresses: WireguardAssociatedAddresses) -> Result<TunnelSettings, Error> {
-        let updateResult = TunnelSettingsManager.update(searchTerm: .persistentReference(self.persistentKeychainReference))
-            { (tunnelSettings) in
-                tunnelSettings.interface.privateKey = privateKey
-                tunnelSettings.interface.addresses = [
-                    addresses.ipv4Address,
-                    addresses.ipv6Address
-                ]
-        }
-
-        return updateResult.mapError { .updateTunnelSettings($0) }
-    }
-}
-
-
-private func nextRotation(creationDate: Date) -> Date? {
-    return Calendar.current.date(byAdding: .day, value: kRotationInterval, to: creationDate)
-}
-
-private func shouldRotateKey(creationDate: Date) -> Bool {
-    return nextRotation(creationDate: creationDate)
-        .map { $0 <= Date() } ?? false
 }

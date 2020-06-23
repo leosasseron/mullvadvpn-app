@@ -96,7 +96,7 @@ class AsyncOperation: Operation {
 class AsyncBlockOperation: AsyncOperation {
     private let block: (@escaping () -> Void) -> Void
 
-    init(block: @escaping (@escaping () -> Void) -> Void) {
+    init(_ block: @escaping (@escaping () -> Void) -> Void) {
         self.block = block
         super.init()
     }
@@ -140,16 +140,16 @@ class AsyncBlockOutputOperation<Output>: AsyncOutputOperation<Output> {
 
     private let executor: Executor
 
-    private init(executor: Executor) {
+    private init(_ executor: Executor) {
         self.executor = executor
     }
 
-    convenience init(block: @escaping (@escaping (Output) -> Void) -> Void) {
-        self.init(executor: .callback(block))
+    convenience init(_ block: @escaping (@escaping (Output) -> Void) -> Void) {
+        self.init(.callback(block))
     }
 
-    convenience init(block: @escaping () -> Output) {
-        self.init(executor: .transform(block))
+    convenience init(_ block: @escaping () -> Output) {
+        self.init(.transform(block))
     }
 
     override func main() {

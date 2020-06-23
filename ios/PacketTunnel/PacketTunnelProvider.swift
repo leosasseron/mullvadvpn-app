@@ -248,10 +248,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 Self.startWireguardDevice(packetFlow: self.packetFlow, configuration: packetTunnelConfig.wireguardConfig) { (result) in
                     switch result {
                     case .success(let device):
-                        self.wireguardDevice = device
-                        self.startKeyRotation(persistentKeychainReference: packetTunnelConfig.persistentKeychainReference)
+                        let keyRotationManager = AutomaticKeyRotationManager(persistentKeychainReference: packetTunnelConfig.persistentKeychainReference)
 
-                        completionHandler(.success(()))
+                        keyRotationManager.eventHandler = { (keyRotationEvent) in
+                            self.reloadTunnelSettings { (result) in
+                                switch result {
+                                case .success:
+                                    break
+
+                                case .failure(let error):
+                                    os_log(.error, log: tunnelProviderLog, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
+                                }
+                            }
+                        }
+
+                        self.wireguardDevice = device
+                        self.keyRotationManager = keyRotationManager
+
+                        keyRotationManager.startAutomaticRotation {
+                            completionHandler(.success(()))
+                        }
 
                     case .failure(let error):
                         completionHandler(.failure(error))
@@ -265,23 +281,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func doStopTunnel(completionHandler: @escaping () -> Void) {
-        guard let device = self.wireguardDevice else {
-            completionHandler()
-            return
+        guard let device = self.wireguardDevice, let keyRotationManager = self.keyRotationManager
+            else {
+                completionHandler()
+                return
         }
 
-        stopKeyRotation()
+        keyRotationManager.stopAutomaticRotation {
+            device.stop { (result) in
+                self.wireguardDevice = nil
+                self.keyRotationManager = nil
 
-        device.stop { (result) in
-            self.wireguardDevice = nil
+                if case .failure(let error) = result {
+                    os_log(.error, log: tunnelProviderLog, "%{public}s",
+                           error.displayChain(message: "Failed to stop the tunnel"))
+                }
 
-            if case .failure(let error) = result {
-                os_log(.error, log: tunnelProviderLog, "%{public}s",
-                       error.displayChain(message: "Failed to stop the tunnel"))
+                // Ignore all errors at this point
+                completionHandler()
             }
-
-            // Ignore all errors at this point
-            completionHandler()
         }
     }
 
@@ -412,31 +430,6 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         addExclusiveOperation(operation)
-    }
-
-    private func startKeyRotation(persistentKeychainReference: Data) {
-        assert(keyRotationManager == nil)
-
-        let manager = AutomaticKeyRotationManager(persistentKeychainReference: persistentKeychainReference)
-        manager.eventHandler = { (keyRotationEvent) in
-            self.reloadTunnelSettings { (result) in
-                switch result {
-                case .success:
-                    break
-
-                case .failure(let error):
-                    os_log(.error, log: tunnelProviderLog, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
-                }
-            }
-        }
-
-        keyRotationManager = manager
-        manager.startAutomaticRotation()
-    }
-
-    private func stopKeyRotation() {
-        keyRotationManager?.stopAutomaticRotation()
-        keyRotationManager = nil
     }
 
     private func addExclusiveOperation(_ operation: Operation) {

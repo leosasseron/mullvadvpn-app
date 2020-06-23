@@ -11,6 +11,9 @@ import NetworkExtension
 import os
 
 enum MapConnectionStatusError: ChainedError {
+    /// A failure to perform the IPC request because the tunnel IPC is already deallocated
+    case missingIpc
+
     /// A failure to send a subsequent IPC request to collect more information, such as tunnel
     /// connection info.
     case ipcRequest(PacketTunnelIpc.Error)
@@ -25,6 +28,9 @@ enum MapConnectionStatusError: ChainedError {
 
     var errorDescription: String? {
         switch self {
+        case .missingIpc:
+            return "Missing IPC"
+
         case .ipcRequest:
             return "IPC request error"
 
@@ -286,44 +292,48 @@ class TunnelManager {
     func loadTunnel(accountToken: String?, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
         let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
             TunnelProviderManagerType.loadAllFromPreferences { (tunnels, error) in
-                if let error = error {
-                    finish(.failure(.loadAllVPNConfigurations(error)))
-                } else {
-                    if let accountToken = self.accountToken {
-                        // Migrate the tunnel settings if needed
-                        self.migrateTunnelSettings(accountToken: accountToken)
+                self.dispatchQueue.async {
+                    if let error = error {
+                        finish(.failure(.loadAllVPNConfigurations(error)))
+                    } else {
+                        if let accountToken = self.accountToken {
+                            // Migrate the tunnel settings if needed
+                            Self.migrateTunnelSettings(accountToken: accountToken)
 
-                        // Load last known public key
-                        self.loadPublicKey(accountToken: accountToken)
-                    }
+                            // Load last known public key
+                            self.loadPublicKey(accountToken: accountToken)
+                        }
 
-                    if let tunnelProvider = tunnels?.first {
-                        // Ensure the consistency between the given account token and the one
-                        // saved in the system tunnel configuration.
-                        if let username = tunnelProvider.protocolConfiguration?.username,
-                            let accountToken = accountToken, accountToken == username {
-                            self.accountToken = accountToken
+                        if let tunnelProvider = tunnels?.first {
+                            // Ensure the consistency between the given account token and the one
+                            // saved in the system tunnel configuration.
+                            if let username = tunnelProvider.protocolConfiguration?.username,
+                                let accountToken = accountToken, accountToken == username {
+                                self.accountToken = accountToken
 
-                            self.setTunnelProvider(tunnelProvider: tunnelProvider) {
+                                self.setTunnelProvider(tunnelProvider: tunnelProvider)
+
                                 finish(.success(()))
-                            }
-                        } else {
-                            // In case of inconsistency, remove the tunnel
-                            tunnelProvider.removeFromPreferences { (error) in
-                                if let error = error {
-                                    finish(.failure(.removeInconsistentVPNConfiguration(error)))
-                                } else {
-                                    self.accountToken = accountToken
+                            } else {
+                                // In case of inconsistency, remove the tunnel
+                                tunnelProvider.removeFromPreferences { (error) in
+                                    self.dispatchQueue.async {
+                                        if let error = error {
+                                            finish(.failure(.removeInconsistentVPNConfiguration(error)))
+                                        } else {
+                                            self.accountToken = accountToken
 
-                                    finish(.success(()))
+                                            finish(.success(()))
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    } else {
-                        // No tunnels found. Save the account token.
-                        self.accountToken = accountToken
+                        } else {
+                            // No tunnels found. Save the account token.
+                            self.accountToken = accountToken
 
-                        finish(.success(()))
+                            finish(.success(()))
+                        }
                     }
                 }
             }
@@ -335,31 +345,27 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     /// Refresh tunnel state.
     /// Use this method to update the tunnel state when app transitions from suspended to active
     /// state.
     func refreshTunnelState(completionHandler: (() -> Void)?) {
-        let operation = AsyncBlockOperation { (finish) in
+        let operation = BlockOperation {
             // Reload the last known public key
             if let accountToken = self.accountToken {
                 self.loadPublicKey(accountToken: accountToken)
             }
 
-            if let tunnelIpc = self.tunnelIpc, let status = self.tunnelProvider?.connection.status {
-                self.updateTunnelState(tunnelIpc: tunnelIpc, connectionStatus: status) {
-                    finish()
-                }
-            } else {
-                finish()
+            if let status = self.tunnelProvider?.connection.status {
+                self.updateTunnelState(connectionStatus: status)
             }
+
+            completionHandler?()
         }
 
-        operation.completionBlock = completionHandler
-
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     func startTunnel(completionHandler: @escaping (Result<(), Error>) -> Void) {
@@ -369,40 +375,13 @@ class TunnelManager {
                 return
             }
 
-            let startVPNTunnel =  {
-                self.makeTunnelProvider(accountToken: accountToken) { (result) in
-                    switch result {
-                    case .success(let tunnelProvider):
-                        self.setTunnelProvider(tunnelProvider: tunnelProvider) {
-                            let result = Result { try tunnelProvider.connection.startVPNTunnel() }
-                                .mapError { Error.startVPNTunnel($0) }
-
-                            finish(result)
-                        }
-
-                    case .failure(let error):
-                        finish(.failure(error))
-                    }
+            self.makeTunnelProvider(accountToken: accountToken) { (result) in
+                let result = result.flatMap { (tunnelProvider) -> Result<(), Error> in
+                    self.setTunnelProvider(tunnelProvider: tunnelProvider)
+                    return Result { try tunnelProvider.connection.startVPNTunnel() }
+                        .mapError { Error.startVPNTunnel($0) }
                 }
-            }
-
-            switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
-            case .success(let keychainEntry):
-                let interfaceSettings = keychainEntry.tunnelSettings.interface
-
-                // Push wireguard key if addresses were not received yet
-                if interfaceSettings.addresses.isEmpty {
-                    self.pushWireguardKeyAndUpdateSettings(
-                        accountToken: accountToken,
-                        publicKey: interfaceSettings.privateKey.publicKey) { (result) in
-                            startVPNTunnel()
-                    }
-                } else {
-                    startVPNTunnel()
-                }
-
-            case .failure(let error):
-                finish(.failure(.readTunnelSettings(error)))
+                finish(result)
             }
         }
 
@@ -412,25 +391,26 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
-    func stopTunnel(completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
-            if let tunnelProvider = self.tunnelProvider {
-                // Disable on-demand when turning off the tunnel to prevent the tunnel from coming
-                // back up
-                tunnelProvider.isOnDemandEnabled = false
-                tunnelProvider.saveToPreferences { (error) in
-                    if let error = error {
-                        finish(.failure(TunnelManager.Error.saveVPNConfiguration(error)))
-                    } else {
-                        tunnelProvider.connection.stopVPNTunnel()
-                        finish(.success(()))
-                    }
+    func stopTunnel(completionHandler: @escaping (Result<(), Error>) -> Void) {
+        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+            guard let tunnelProvider = self.tunnelProvider else {
+                completionHandler(.success(()))
+                return
+            }
+
+            // Disable on-demand when stopping the tunnel to prevent it from coming back up
+            tunnelProvider.isOnDemandEnabled = false
+
+            tunnelProvider.saveToPreferences { (error) in
+                if let error = error {
+                    finish(.failure(.saveVPNConfiguration(error)))
+                } else {
+                    tunnelProvider.connection.stopVPNTunnel()
+                    finish(.success(()))
                 }
-            } else {
-                finish(.success(()))
             }
         }
 
@@ -440,51 +420,36 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     func setAccount(accountToken: String, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
         let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
-            let result = self.makeTunnelConfiguration(accountToken: accountToken)
-
-            switch result {
+            switch Self.makeTunnelSettings(accountToken: accountToken) {
             case .success(let tunnelSettings):
                 let interfaceSettings = tunnelSettings.interface
 
-                let confirmSetAccount = {
+                let saveAccountData = {
                     // Save the last known public key
                     self.publicKey = tunnelSettings.interface.privateKey.publicKey
                     self.accountToken = accountToken
                 }
 
-                // Push wireguard key if addresses were not received yet
-                if interfaceSettings.addresses.isEmpty {
-                    self.pushWireguardKeyAndUpdateSettings(
-                        accountToken: accountToken,
-                        publicKey: interfaceSettings.privateKey.publicKey) { (result) in
-                            let result = result.flatMapError { (error) -> Result<(), TunnelManager.Error> in
-                                // We'll do the second attempt to push the key before establishing
-                                // the tunnel
-                                if case .pushWireguardKey = error {
-                                    os_log(.error, "%{public}s", error.displayChain())
-
-                                    return .success(())
-                                } else {
-                                    return .failure(error)
-                                }
-                            }
-
-                            if case .success = result {
-                                confirmSetAccount()
-                            }
-
-                            finish(result)
-                    }
-                } else {
-                    confirmSetAccount()
+                guard interfaceSettings.addresses.isEmpty else {
+                    saveAccountData()
                     finish(.success(()))
+                    return
                 }
 
+                // Push wireguard key if addresses were not received yet
+                self.pushWireguardKeyAndUpdateSettings(
+                    accountToken: accountToken,
+                    publicKey: interfaceSettings.privateKey.publicKey) { (result) in
+                        if case .success = result {
+                            saveAccountData()
+                        }
+                        finish(result)
+                }
 
             case .failure(let error):
                 finish(.failure(error))
@@ -497,7 +462,7 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     /// Remove the account token and remove the active tunnel
@@ -509,17 +474,19 @@ class TunnelManager {
             }
 
             let cleanupState = {
-                self.accountToken = nil
-                self.publicKey = nil
-                self.tunnelProvider = nil
-                self.tunnelIpc = nil
+                self.dispatchQueue.async {
+                    self.accountToken = nil
+                    self.publicKey = nil
+                    self.tunnelProvider = nil
+                    self.tunnelIpc = nil
 
-                self.unregisterConnectionObserver()
-                self.tunnelState = .disconnected
+                    self.unregisterConnectionObserver()
+                    self.tunnelState = .disconnected
+                }
             }
 
             let removeFromKeychainAndServer = {
-                switch TunnelSettingsManager.load(searchTerm: .accountToken(accountToken)) {
+                switch Self.loadTunnelSettings(accountToken: accountToken) {
                 case .success(let keychainEntry):
                     let publicKey = keychainEntry.tunnelSettings
                         .interface
@@ -541,7 +508,7 @@ class TunnelManager {
                         case .failure(let error):
                             os_log(.error, "%{public}s", error.displayChain(message: "Failed to unset account"))
                         }
-
+                        
                         cleanupState()
                         finish(.success(()))
                     })
@@ -585,7 +552,7 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     func verifyPublicKey(completionHandler: @escaping (Result<Bool, Error>) -> Void) {
@@ -595,26 +562,25 @@ class TunnelManager {
                 return
             }
 
-            let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
-            switch result {
+            switch Self.loadTunnelSettings(accountToken: accountToken) {
             case .success(let keychainEntry):
                 let publicKey = keychainEntry.tunnelSettings.interface
                     .privateKey
                     .publicKey.rawRepresentation
 
                 let rpcRequest = self.rpc.checkWireguardKey(
-                    accountToken: accountToken,
+                    accountToken: keychainEntry.accountToken,
                     publicKey: publicKey
                 )
 
                 let urlSessionTask = rpcRequest.dataTask { (result) in
-                    finish(result.mapError {Error.verifyWireguardKey($0) })
+                    finish(result.mapError { Error.verifyWireguardKey($0) })
                 }
 
                 urlSessionTask?.resume()
 
             case .failure(let error):
-                finish(.failure(.readTunnelSettings(error)))
+                finish(.failure(error))
             }
         }
 
@@ -624,7 +590,7 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        operationQueue.addOperation(operation)
     }
 
     func regeneratePrivateKey(completionHandler: @escaping (Result<(), Error>) -> Void) {
@@ -634,9 +600,9 @@ class TunnelManager {
                 return
             }
 
-            let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
-            switch result {
+            switch Self.loadTunnelSettings(accountToken: accountToken) {
             case .success(let keychainEntry):
+                let accountToken = keychainEntry.accountToken
                 let newPrivateKey = WireguardPrivateKey()
                 let oldPublicKey = keychainEntry.tunnelSettings.interface
                     .privateKey
@@ -675,7 +641,7 @@ class TunnelManager {
                 }
 
             case .failure(let error):
-                finish(.failure(.readTunnelSettings(error)))
+                finish(.failure(error))
             }
         }
 
@@ -685,37 +651,37 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     func setRelayConstraints(_ constraints: RelayConstraints, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
         let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
-            if let accountToken = self.accountToken {
-                let updateResult = TunnelSettingsManager.update(searchTerm: .accountToken(accountToken)) {
-                    (tunnelConfig) in
-                    tunnelConfig.relayConstraints = constraints
-                }
+            guard let accountToken = self.accountToken else {
+                finish(.failure(.missingAccount))
+                return
+            }
 
-                switch updateResult {
-                case .success:
-                    if let tunnelIpc = self.tunnelIpc {
-                        tunnelIpc.reloadTunnelSettings { (ipcResult) in
-                            // Ignore Packet Tunnel IPC errors but log them
-                            if case .failure(let error) = ipcResult {
-                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
-                            }
-
-                            finish(.success(()))
+            let updateResult = Self.updateTunnelSettings(accountToken: accountToken) { (tunnelSettings) in
+                tunnelSettings.relayConstraints = constraints
+            }
+            
+            switch updateResult {
+            case .success:
+                if let tunnelIpc = self.tunnelIpc {
+                    tunnelIpc.reloadTunnelSettings { (ipcResult) in
+                        // Ignore Packet Tunnel IPC errors but log them
+                        if case .failure(let error) = ipcResult {
+                            os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
                         }
-                    } else {
+
                         finish(.success(()))
                     }
-
-                case .failure(let error):
-                    finish(.failure(.updateTunnelSettings(error)))
+                } else {
+                    finish(.success(()))
                 }
-            } else {
-                finish(.failure(.missingAccount))
+
+            case .failure(let error):
+                finish(.failure(error))
             }
         }
 
@@ -725,38 +691,23 @@ class TunnelManager {
             }
         }
 
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     func getRelayConstraints(completionHandler: @escaping (Result<RelayConstraints, TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation { () -> Result<RelayConstraints, Error> in
+        let operation = BlockOperation {
             if let accountToken = self.accountToken {
-                let result = TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
-
-                switch result {
-                case .success(let keychainEntry):
-                    return .success(keychainEntry.tunnelSettings.relayConstraints)
-
-                case .failure(let error):
-                    // Return default constraints if the config is not found in Keychain
-                    if case .lookupEntry(.itemNotFound) = error {
-                        return .success(TunnelSettings().relayConstraints)
-                    } else {
-                        return .failure(.readTunnelSettings(error))
-                    }
+                let result = Self.loadTunnelSettings(accountToken: accountToken)
+                    .map { (keychainEntry) -> RelayConstraints in
+                        return keychainEntry.tunnelSettings.relayConstraints
                 }
+                completionHandler(result)
             } else {
-                return .failure(.missingAccount)
+                completionHandler(.failure(.missingAccount))
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
-        }
-
-        addExclusiveOperation(operation)
+        addTunnelControlOperation(operation)
     }
 
     // MARK: - Tunnel observeration
@@ -803,25 +754,39 @@ class TunnelManager {
 
     // MARK: - Operation management
 
-    private let operationQueue = OperationQueue()
-    private var lastExclusiveOperation: Operation?
+    private lazy var operationQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.underlyingQueue = self.dispatchQueue
+        return queue
+    }()
+    private var tunnelControlOperation: Operation?
+    private var tunnelStateUpdateOperation: Operation?
 
-    private func addExclusiveOperation(_ operation: Operation) {
+    private func addTunnelControlOperation(_ operation: Operation) {
         self.stateLock.withCriticalBlock {
-            if let dependency = self.lastExclusiveOperation {
+            if let dependency = self.tunnelControlOperation {
                 operation.addDependency(dependency)
             }
-            self.lastExclusiveOperation = operation
+            self.tunnelControlOperation = operation
             operationQueue.addOperation(operation)
         }
     }
 
-    // MARK: - Private
+    private func addTunnelStateUpdateOperation(_ operation: Operation) {
+        self.stateLock.withCriticalBlock {
+            if let dependency = self.tunnelStateUpdateOperation {
+                operation.addDependency(dependency)
+            }
+            self.tunnelStateUpdateOperation = operation
+            operationQueue.addOperation(operation)
+        }
+    }
+
+    // MARK: - Private methods
 
     /// Set the instance of the active tunnel and add the tunnel status observer
-    private func setTunnelProvider(tunnelProvider: TunnelProviderManagerType, completionHandler: @escaping () -> Void) {
+    private func setTunnelProvider(tunnelProvider: TunnelProviderManagerType) {
         guard self.tunnelProvider != tunnelProvider else {
-            completionHandler()
             return
         }
 
@@ -837,27 +802,19 @@ class TunnelManager {
         // Register for tunnel connection status changes
         unregisterConnectionObserver()
         connectionStatusObserver = NotificationCenter.default
-            .addObserver(forName: .NEVPNStatusDidChange, object: connection, queue: nil) {
+            .addObserver(forName: .NEVPNStatusDidChange, object: connection, queue: operationQueue) {
                 [weak self] (notification) in
                 guard let self = self else { return }
 
                 let connection = notification.object as? VPNConnectionProtocol
 
                 if let status = connection?.status {
-                    let operation = AsyncBlockOperation { (finish) in
-                        self.updateTunnelState(tunnelIpc: tunnelIpc, connectionStatus: status) {
-                            finish()
-                        }
-                    }
-
-                    self.addExclusiveOperation(operation)
+                    self.updateTunnelState(connectionStatus: status)
                 }
         }
 
-        // Update the existing connection status
-        updateTunnelState(tunnelIpc: tunnelIpc,
-                          connectionStatus: connection.status,
-                          completionHandler: completionHandler)
+        // Update the existing state
+        updateTunnelState(connectionStatus: tunnelProvider.connection.status)
     }
 
     private func unregisterConnectionObserver() {
@@ -890,26 +847,21 @@ class TunnelManager {
         )
 
         let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
-            switch rpcResult {
-            case .success(let associatedAddresses):
-                let updateResult = TunnelSettingsManager
-                    .update(searchTerm: .accountToken(accountToken)) { (tunnelSettings) in
-                        tunnelSettings.interface.addresses = [
-                            associatedAddresses.ipv4Address,
-                            associatedAddresses.ipv6Address
-                        ]
+            self.dispatchQueue.async {
+                let updateResult = rpcResult
+                    .mapError({ (rpcError) -> Error in
+                        return Error.pushWireguardKey(rpcError)
+                    })
+                    .flatMap { (associatedAddresses) -> Result<(), Error> in
+                        return Self.updateTunnelSettings(accountToken: accountToken) { (tunnelSettings) in
+                            tunnelSettings.interface.addresses = [
+                                associatedAddresses.ipv4Address,
+                                associatedAddresses.ipv6Address
+                            ]
+                        }.map { _ in () }
                 }
 
-                switch updateResult {
-                case .success:
-                    completionHandler(.success(()))
-
-                case .failure(let error):
-                    completionHandler(.failure(.updateTunnelSettings(error)))
-                }
-
-            case .failure(let error):
-                completionHandler(.failure(.pushWireguardKey(error)))
+                completionHandler(updateResult)
             }
         }
 
@@ -929,26 +881,22 @@ class TunnelManager {
         )
 
         let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
-            switch rpcResult {
-            case .success(let associatedAddresses):
-                let updateResult = TunnelSettingsManager.update(searchTerm: .accountToken(accountToken)) {
-                    (tunnelConfiguration) in
-                    tunnelConfiguration.interface.privateKey = newPrivateKey
-                    tunnelConfiguration.interface.addresses = [
-                        associatedAddresses.ipv4Address,
-                        associatedAddresses.ipv6Address
-                    ]
+            self.dispatchQueue.async {
+                let updateResult = rpcResult
+                    .mapError({ (rpcError) -> Error in
+                        return Error.replaceWireguardKey(rpcError)
+                    })
+                    .flatMap { (associatedAddresses) -> Result<(), Error> in
+                        return Self.updateTunnelSettings(accountToken: accountToken) { (tunnelSettings) in
+                            tunnelSettings.interface.privateKey = newPrivateKey
+                            tunnelSettings.interface.addresses = [
+                                associatedAddresses.ipv4Address,
+                                associatedAddresses.ipv6Address
+                            ]
+                        }.map { _ in () }
                 }
 
-                switch updateResult {
-                case .success:
-                    completionHandler(.success(()))
-                case .failure(let error):
-                    completionHandler(.failure(.updateTunnelSettings(error)))
-                }
-
-            case .failure(let error):
-                completionHandler(.failure(.replaceWireguardKey(error)))
+                completionHandler(updateResult)
             }
         }
 
@@ -956,35 +904,43 @@ class TunnelManager {
     }
 
     /// Initiates the `tunnelState` update
-    private func updateTunnelState(tunnelIpc: PacketTunnelIpc, connectionStatus: NEVPNStatus, completionHandler: @escaping () -> Void) {
-        os_log(.default, "VPN Status: %{public}s", "\(connectionStatus)")
+    private func updateTunnelState(connectionStatus: NEVPNStatus) {
+        let operation = AsyncBlockOperation { (finish) in
+            self.mapTunnelState(connectionStatus: connectionStatus) { (result) in
+                switch result {
+                case .success(let tunnelState):
+                    os_log(.default, "Set tunnel state: %{public}s", "\(tunnelState)")
+                    self.tunnelState = tunnelState
 
-        mapTunnelState(tunnelIpc: tunnelIpc, connectionStatus: connectionStatus) { (result) in
-            switch result {
-            case .success(let tunnelState):
-                os_log(.default, "Set tunnel state: %{public}s", "\(tunnelState)")
-                self.tunnelState = tunnelState
+                case .failure(let error):
+                    os_log(.error, "%{public}s",
+                           error.displayChain(message: "Failed to map the tunnel state"))
+                }
 
-            case .failure(let error):
-                os_log(.error, "%{public}s",
-                error.displayChain(message: "Failed to map the tunnel state"))
+                finish()
             }
-
-            completionHandler()
         }
+
+        addTunnelStateUpdateOperation(operation)
     }
 
     /// Maps `NEVPNStatus` to `TunnelState`.
     /// Collects the `TunnelConnectionInfo` from the tunnel via IPC if needed before assigning the
     /// `tunnelState`
-    private func mapTunnelState(tunnelIpc: PacketTunnelIpc, connectionStatus: NEVPNStatus, completionHandler: @escaping (Result<TunnelState, MapConnectionStatusError>) -> Void) {
+    private func mapTunnelState(connectionStatus: NEVPNStatus, completionHandler: @escaping (Result<TunnelState, MapConnectionStatusError>) -> Void) {
         switch connectionStatus {
         case .connected:
-            tunnelIpc.getTunnelInformation { (result) in
-                let result = result.map { TunnelState.connected($0) }
-                    .mapError { MapConnectionStatusError.ipcRequest($0) }
+            if let tunnelIpc = tunnelIpc {
+                tunnelIpc.getTunnelInformation { (result) in
+                    self.dispatchQueue.async {
+                        let result = result.map { TunnelState.connected($0) }
+                            .mapError { MapConnectionStatusError.ipcRequest($0) }
 
-                completionHandler(result)
+                        completionHandler(result)
+                    }
+                }
+            } else {
+                completionHandler(.failure(.missingIpc))
             }
 
         case .connecting:
@@ -1003,11 +959,17 @@ class TunnelManager {
                 self.loadPublicKey(accountToken: accountToken)
             }
 
-            tunnelIpc.getTunnelInformation { (result) in
-                let result = result.map { TunnelState.reconnecting($0) }
-                    .mapError { MapConnectionStatusError.ipcRequest($0) }
+            if let tunnelIpc = tunnelIpc {
+                tunnelIpc.getTunnelInformation { (result) in
+                    self.dispatchQueue.async {
+                        let result = result.map { TunnelState.reconnecting($0) }
+                            .mapError { MapConnectionStatusError.ipcRequest($0) }
 
-                completionHandler(result)
+                        completionHandler(result)
+                    }
+                }
+            } else {
+                completionHandler(.failure(.missingIpc))
             }
 
         case .invalid:
@@ -1018,9 +980,61 @@ class TunnelManager {
         }
     }
 
-    /// Retrieve the existing TunnelConfiguration or create a new one
-    private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelSettings, TunnelManager.Error> {
-        TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
+    private func makeTunnelProvider(accountToken: String, completionHandler: @escaping (Result<TunnelProviderManagerType, TunnelManager.Error>) -> Void) {
+        TunnelProviderManagerType.loadAllFromPreferences { (tunnels, error) in
+            self.dispatchQueue.async {
+                if let error = error {
+                    completionHandler(.failure(.loadAllVPNConfigurations(error)))
+                } else {
+                    let result = Self.setupTunnelProvider(accountToken: accountToken, tunnels: tunnels)
+
+                    guard case .success(let tunnelProvider) = result else {
+                        completionHandler(result)
+                        return
+                    }
+
+                    tunnelProvider.saveToPreferences { (error) in
+                        self.dispatchQueue.async {
+                            if let error = error {
+                                completionHandler(.failure(.saveVPNConfiguration(error)))
+                            } else {
+                                // Refresh connection status after saving the tunnel preferences.
+                                // Basically it's only necessary to do for new instances of
+                                // `NETunnelProviderManager`, but we do that for the existing ones too
+                                // for simplicity as it has no side effects.
+                                tunnelProvider.loadFromPreferences { (error) in
+                                    self.dispatchQueue.async {
+                                        if let error = error {
+                                            completionHandler(.failure(.reloadVPNConfiguration(error)))
+                                        } else {
+                                            completionHandler(.success(tunnelProvider))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                }
+            }
+        }
+    }
+
+    // MARK: - Private class methods
+
+    private class func loadTunnelSettings(accountToken: String) -> Result<TunnelSettingsManager.KeychainEntry, Error> {
+        return TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
+            .mapError { Error.readTunnelSettings($0) }
+    }
+
+    private class func updateTunnelSettings(accountToken: String, block: (inout TunnelSettings) -> Void) -> Result<TunnelSettings, Error> {
+        return TunnelSettingsManager.update(searchTerm: .accountToken(accountToken), using: block)
+            .mapError { Error.updateTunnelSettings($0) }
+    }
+
+    /// Retrieve the existing `TunnelSettings` or create the new ones
+    private class func makeTunnelSettings(accountToken: String) -> Result<TunnelSettings, TunnelManager.Error> {
+        return TunnelSettingsManager.load(searchTerm: .accountToken(accountToken))
             .map { $0.tunnelSettings }
             .flatMapError { (error) -> Result<TunnelSettings, TunnelManager.Error> in
                 // Return default tunnel configuration if the config is not found in Keychain
@@ -1037,72 +1051,36 @@ class TunnelManager {
         }
     }
 
-    private func makeTunnelProvider(accountToken: String, completionHandler: @escaping (Result<TunnelProviderManagerType, TunnelManager.Error>) -> Void) {
-        TunnelProviderManagerType.loadAllFromPreferences { (tunnels, error) in
-            if let error = error {
-                completionHandler(.failure(.loadAllVPNConfigurations(error)))
-            } else {
+    private class func setupTunnelProvider(accountToken: String ,tunnels: [TunnelProviderManagerType]?) -> Result<TunnelProviderManagerType, Error> {
+        // Request persistent keychain reference to tunnel settings
+        return TunnelSettingsManager.getPersistentKeychainReference(account: accountToken)
+            .map { (passwordReference) -> TunnelProviderManagerType in
                 // Get the first available tunnel or make a new one
                 let tunnelProvider = tunnels?.first ?? TunnelProviderManagerType()
 
-                // Request persistent keychain reference to tunnel settings
-                let persistentReferenceResult = TunnelSettingsManager
-                    .getPersistentKeychainReference(account: accountToken)
+                let protocolConfig = NETunnelProviderProtocol()
+                protocolConfig.providerBundleIdentifier = ApplicationConfiguration.packetTunnelExtensionIdentifier
+                protocolConfig.serverAddress = ""
+                protocolConfig.username = accountToken
+                protocolConfig.passwordReference = passwordReference
 
-                switch persistentReferenceResult {
-                case .success(let passwordReference):
-                    tunnelProvider.isEnabled = true
-                    tunnelProvider.localizedDescription = "WireGuard"
-                    tunnelProvider.protocolConfiguration = self.makeProtocolConfiguration(
-                        accountToken: accountToken,
-                        passwordReference: passwordReference
-                    )
+                tunnelProvider.isEnabled = true
+                tunnelProvider.localizedDescription = "WireGuard"
+                tunnelProvider.protocolConfiguration = protocolConfig
 
-                    // Enable on-demand VPN, always connect the tunnel when on Wi-Fi or cellular
-                    let alwaysOnRule = NEOnDemandRuleConnect()
-                    alwaysOnRule.interfaceTypeMatch = .any
-                    tunnelProvider.onDemandRules = [alwaysOnRule]
-                    tunnelProvider.isOnDemandEnabled = true
+                // Enable on-demand VPN, always connect the tunnel when on Wi-Fi or cellular
+                let alwaysOnRule = NEOnDemandRuleConnect()
+                alwaysOnRule.interfaceTypeMatch = .any
+                tunnelProvider.onDemandRules = [alwaysOnRule]
+                tunnelProvider.isOnDemandEnabled = true
 
-                    tunnelProvider.saveToPreferences { (error) in
-                        if let error = error {
-                            completionHandler(.failure(.saveVPNConfiguration(error)))
-                        } else {
-                            // Refresh connection status after saving the tunnel preferences.
-                            // Basically it's only necessary to do for new instances of
-                            // `NETunnelProviderManager`, but we do that for the existing ones too
-                            // for simplicity as it has no side effects.
-                            tunnelProvider.loadFromPreferences { (error) in
-                                if let error = error {
-                                    completionHandler(.failure(.reloadVPNConfiguration(error)))
-                                } else {
-                                    self.setTunnelProvider(tunnelProvider: tunnelProvider) {
-                                        completionHandler(.success(tunnelProvider))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                case .failure(let error):
-                    completionHandler(.failure(.obtainPersistentKeychainReference(error)))
-                }
-            }
+                return tunnelProvider
+        }.mapError { (error) -> Error in
+            return .obtainPersistentKeychainReference(error)
         }
     }
 
-    /// Produce the new tunnel provider protocol configuration
-    private func makeProtocolConfiguration(accountToken: String, passwordReference: Data) -> NETunnelProviderProtocol {
-        let protocolConfig = NETunnelProviderProtocol()
-        protocolConfig.providerBundleIdentifier = ApplicationConfiguration.packetTunnelExtensionIdentifier
-        protocolConfig.serverAddress = ""
-        protocolConfig.username = accountToken
-        protocolConfig.passwordReference = passwordReference
-
-        return protocolConfig
-    }
-
-    private func migrateTunnelSettings(accountToken: String) {
+    private class func migrateTunnelSettings(accountToken: String) {
         let result = TunnelSettingsManager
             .migrateKeychainEntry(searchTerm: .accountToken(accountToken))
 
