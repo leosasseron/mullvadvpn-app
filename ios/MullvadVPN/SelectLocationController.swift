@@ -12,7 +12,7 @@ import os
 
 private let kCellIdentifier = "Cell"
 
-class SelectLocationController: UITableViewController {
+class SelectLocationController: UITableViewController, RelayCacheObserver {
 
     private enum Error: ChainedError {
         case loadRelayList(RelayCacheError)
@@ -28,7 +28,6 @@ class SelectLocationController: UITableViewController {
         }
     }
 
-    private let relayCache = try! RelayCache.withDefaultLocationAndEphemeralSession().get()
     private var relayList: RelayList?
     private var relayConstraints: RelayConstraints?
     private var expandedItems = [RelayLocation]()
@@ -67,6 +66,8 @@ class SelectLocationController: UITableViewController {
         tableView.dataSource = dataSource
 
         addActivityIndicatorView()
+        
+        RelayCache.shared.addObserver(self)
         loadData()
     }
 
@@ -100,19 +101,47 @@ class SelectLocationController: UITableViewController {
         }
     }
 
+    // MARK: - RelayCacheObserver
+
+    func relayCache(_ relayCache: RelayCache, didUpdateCachedRelayList cachedRelayList: CachedRelayList) {
+        self.didReceiveCachedRelays(cachedRelayList: cachedRelayList) { (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let (cachedRelayList, relayConstraints)):
+                    self.didReceive(relayList: cachedRelayList.relayList, relayConstraints: relayConstraints)
+
+                case .failure(let error):
+                    os_log(.error, "%{public}s", error.displayChain())
+                }
+            }
+        }
+    }
+
     // MARK: - Relay list handling
 
+    private func loadData() {
+        activityIndicator.startAnimating()
+
+        fetchRelays { (result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let (cachedRelayList, relayConstraints)):
+                    self.didReceive(relayList: cachedRelayList.relayList, relayConstraints: relayConstraints)
+
+                case .failure(let error):
+                    os_log(.error, "%{public}s", error.displayChain())
+                }
+
+                self.activityIndicator.stopAnimating()
+            }
+        }
+    }
+
     private func fetchRelays(completionHandler: @escaping (Result<(CachedRelayList, RelayConstraints), Error>) -> Void) {
-        relayCache.read { (result) in
+        RelayCache.shared.read { (result) in
             switch result {
             case .success(let cachedRelayList):
-                TunnelManager.shared.getRelayConstraints { (result) in
-                    let result = result
-                        .map { (cachedRelayList, $0) }
-                        .mapError { Error.getRelayConstraints($0) }
-
-                    completionHandler(result)
-                }
+                self.didReceiveCachedRelays(cachedRelayList: cachedRelayList, completionHandler: completionHandler)
 
             case .failure(let error):
                 completionHandler(.failure(.loadRelayList(error)))
@@ -120,28 +149,18 @@ class SelectLocationController: UITableViewController {
         }
     }
 
-    private func loadData() {
-        activityIndicator.startAnimating()
+    private func didReceiveCachedRelays(cachedRelayList: CachedRelayList, completionHandler: @escaping (Result<(CachedRelayList, RelayConstraints), Error>) -> Void) {
+        TunnelManager.shared.getRelayConstraints { (result) in
+            let result = result
+                .map { (cachedRelayList, $0) }
+                .mapError { Error.getRelayConstraints($0) }
 
-        fetchRelays { [weak self] (result) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let (cachedRelayList, relayConstraints)):
-                    let relayList = cachedRelayList.relayList.sorted()
-
-                    self?.didReceive(relayList: relayList, relayConstraints: relayConstraints)
-
-                case .failure(let error):
-                    os_log(.error, "%{public}s", error.displayChain())
-                }
-
-                self?.activityIndicator.stopAnimating()
-            }
+            completionHandler(result)
         }
     }
 
     private func didReceive(relayList: RelayList, relayConstraints: RelayConstraints) {
-        self.relayList = relayList
+        self.relayList = relayList.sorted()
         self.relayConstraints = relayConstraints
 
         let relayLocation = relayConstraints.location.value

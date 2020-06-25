@@ -27,6 +27,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         let accountToken = Account.shared.token
 
+        RelayCache.shared.updateRelays()
+
         TunnelManager.shared.loadTunnel(accountToken: accountToken) { (result) in
             DispatchQueue.main.async {
                 if case .failure(let error) = result {

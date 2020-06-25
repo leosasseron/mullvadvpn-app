@@ -235,7 +235,7 @@ class TunnelManager {
     private var tunnelProvider: TunnelProviderManagerType?
     private var tunnelIpc: PacketTunnelIpc?
 
-    private let stateLock = NSRecursiveLock()
+    private let stateLock = NSLock()
     private var tunnelObservers = [WeakTunnelObserverBox]()
 
     /// A VPN connection status observer
@@ -244,11 +244,13 @@ class TunnelManager {
     /// An account token associated with the active tunnel
     private var accountToken: String?
 
+    private var _tunnelState = TunnelState.disconnected
+    private var _publicKey: WireguardPublicKey?
+
     private init() {}
 
     // MARK: - Public
 
-    private var _tunnelState = TunnelState.disconnected
     private(set) var tunnelState: TunnelState {
         set {
             stateLock.withCriticalBlock {
@@ -266,8 +268,7 @@ class TunnelManager {
         }
     }
 
-    /// A last known public key
-    private var _publicKey: WireguardPublicKey?
+    /// The last known public key
     private(set) var publicKey: WireguardPublicKey? {
         set {
             stateLock.withCriticalBlock {
@@ -425,34 +426,34 @@ class TunnelManager {
 
     func setAccount(accountToken: String, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
         let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
-            switch Self.makeTunnelSettings(accountToken: accountToken) {
-            case .success(let tunnelSettings):
-                let interfaceSettings = tunnelSettings.interface
+            let result = Self.makeTunnelSettings(accountToken: accountToken)
 
-                let saveAccountData = {
-                    // Save the last known public key
-                    self.publicKey = tunnelSettings.interface.privateKey.publicKey
-                    self.accountToken = accountToken
-                }
+            guard case .success(let tunnelSettings) = result else {
+                finish(result.map { _ in () })
+                return
+            }
 
-                guard interfaceSettings.addresses.isEmpty else {
+            let interfaceSettings = tunnelSettings.interface
+            let publicKey = interfaceSettings.privateKey.publicKey
+
+            let saveAccountData = {
+                // Save the last known public key
+                self.publicKey = publicKey
+                self.accountToken = accountToken
+            }
+
+            guard interfaceSettings.addresses.isEmpty else {
+                saveAccountData()
+                finish(.success(()))
+                return
+            }
+
+            // Push wireguard key if addresses were not received yet
+            self.pushWireguardKeyAndUpdateSettings(accountToken: accountToken, publicKey: publicKey) { (result) in
+                if case .success = result {
                     saveAccountData()
-                    finish(.success(()))
-                    return
                 }
-
-                // Push wireguard key if addresses were not received yet
-                self.pushWireguardKeyAndUpdateSettings(
-                    accountToken: accountToken,
-                    publicKey: interfaceSettings.privateKey.publicKey) { (result) in
-                        if case .success = result {
-                            saveAccountData()
-                        }
-                        finish(result)
-                }
-
-            case .failure(let error):
-                finish(.failure(error))
+                finish(result)
             }
         }
 
@@ -474,15 +475,13 @@ class TunnelManager {
             }
 
             let cleanupState = {
-                self.dispatchQueue.async {
-                    self.accountToken = nil
-                    self.publicKey = nil
-                    self.tunnelProvider = nil
-                    self.tunnelIpc = nil
+                self.accountToken = nil
+                self.publicKey = nil
+                self.tunnelProvider = nil
+                self.tunnelIpc = nil
 
-                    self.unregisterConnectionObserver()
-                    self.tunnelState = .disconnected
-                }
+                self.unregisterConnectionObserver()
+                self.tunnelState = .disconnected
             }
 
             let removeFromKeychainAndServer = {
@@ -501,16 +500,18 @@ class TunnelManager {
                     )
 
                     let urlSessionTask = rpcRequest.dataTask(completionHandler: { (result) in
-                        switch result {
-                        case .success(let isRemoved):
-                            os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
+                        self.dispatchQueue.async {
+                            switch result {
+                            case .success(let isRemoved):
+                                os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
 
-                        case .failure(let error):
-                            os_log(.error, "%{public}s", error.displayChain(message: "Failed to unset account"))
+                            case .failure(let error):
+                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to unset account"))
+                            }
+
+                            cleanupState()
+                            finish(.success(()))
                         }
-                        
-                        cleanupState()
-                        finish(.success(()))
                     })
 
                     urlSessionTask?.resume()
@@ -533,15 +534,17 @@ class TunnelManager {
 
             // Remove VPN configuration
             tunnelProvider.removeFromPreferences(completionHandler: { (error) in
-                if let error = error {
-                    // Ignore error if the tunnel was already removed by user
-                    if let systemError = error as? NEVPNError, systemError.code == .configurationInvalid {
-                        removeFromKeychainAndServer()
+                self.dispatchQueue.async {
+                    if let error = error {
+                        // Ignore error if the tunnel was already removed by user
+                        if let systemError = error as? NEVPNError, systemError.code == .configurationInvalid {
+                            removeFromKeychainAndServer()
+                        } else {
+                            finish(.failure(.removeVPNConfiguration(error)))
+                        }
                     } else {
-                        finish(.failure(.removeVPNConfiguration(error)))
+                        removeFromKeychainAndServer()
                     }
-                } else {
-                    removeFromKeychainAndServer()
                 }
             })
         }
@@ -600,48 +603,39 @@ class TunnelManager {
                 return
             }
 
-            switch Self.loadTunnelSettings(accountToken: accountToken) {
-            case .success(let keychainEntry):
-                let accountToken = keychainEntry.accountToken
-                let newPrivateKey = WireguardPrivateKey()
-                let oldPublicKey = keychainEntry.tunnelSettings.interface
-                    .privateKey
-                    .publicKey
+            let result = Self.loadTunnelSettings(accountToken: accountToken)
+            guard case .success(let keychainEntry) = result else {
+                finish(result.map { _ in () })
+                return
+            }
 
-                self.replaceWireguardKeyAndUpdateSettings(
-                    accountToken: accountToken,
-                    oldPublicKey: oldPublicKey,
-                    newPrivateKey: newPrivateKey
-                ) { (result) in
-                    switch result {
-                    case .success:
-                        // Save new public key
-                        self.publicKey = newPrivateKey.publicKey
+            let newPrivateKey = WireguardPrivateKey()
+            let oldPublicKey = keychainEntry.tunnelSettings.interface
+                .privateKey
+                .publicKey
 
-                        if let tunnelIpc = self.tunnelIpc {
-                            tunnelIpc.reloadTunnelSettings { (ipcResult) in
-                                switch ipcResult {
-                                case .success:
-                                    finish(.success(()))
-
-                                case .failure(let error):
-                                    // Ignore Packet Tunnel IPC errors but log them
-                                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
-
-                                    finish(.success(()))
-                                }
-                            }
-                        } else {
-                            finish(.success(()))
-                        }
-
-                    case .failure(let error):
-                        finish(.failure(error))
-                    }
+            self.replaceWireguardKeyAndUpdateSettings(accountToken: accountToken, oldPublicKey: oldPublicKey, newPrivateKey: newPrivateKey) { (result) in
+                guard case .success = result else {
+                    finish(result)
+                    return
                 }
 
-            case .failure(let error):
-                finish(.failure(error))
+                // Save new public key
+                self.publicKey = newPrivateKey.publicKey
+
+                guard let tunnelIpc = self.tunnelIpc else {
+                    finish(.success(()))
+                    return
+                }
+
+                tunnelIpc.reloadTunnelSettings { (ipcResult) in
+                    if case .failure(let error) = ipcResult {
+                        // Ignore Packet Tunnel IPC errors but log them
+                        os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
+                    }
+
+                    finish(.success(()))
+                }
             }
         }
 
@@ -661,27 +655,27 @@ class TunnelManager {
                 return
             }
 
-            let updateResult = Self.updateTunnelSettings(accountToken: accountToken) { (tunnelSettings) in
+            let result = Self.updateTunnelSettings(accountToken: accountToken) { (tunnelSettings) in
                 tunnelSettings.relayConstraints = constraints
             }
             
-            switch updateResult {
-            case .success:
-                if let tunnelIpc = self.tunnelIpc {
-                    tunnelIpc.reloadTunnelSettings { (ipcResult) in
-                        // Ignore Packet Tunnel IPC errors but log them
-                        if case .failure(let error) = ipcResult {
-                            os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
-                        }
+            guard case .success = result else {
+                finish(result.map { _ in () })
+                return
+            }
 
-                        finish(.success(()))
-                    }
-                } else {
-                    finish(.success(()))
+            guard let tunnelIpc = self.tunnelIpc else {
+                finish(.success(()))
+                return
+            }
+
+            tunnelIpc.reloadTunnelSettings { (ipcResult) in
+                // Ignore Packet Tunnel IPC errors but log them
+                if case .failure(let error) = ipcResult {
+                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
                 }
 
-            case .failure(let error):
-                finish(.failure(error))
+                finish(.success(()))
             }
         }
 
@@ -696,15 +690,17 @@ class TunnelManager {
 
     func getRelayConstraints(completionHandler: @escaping (Result<RelayConstraints, TunnelManager.Error>) -> Void) {
         let operation = BlockOperation {
-            if let accountToken = self.accountToken {
-                let result = Self.loadTunnelSettings(accountToken: accountToken)
-                    .map { (keychainEntry) -> RelayConstraints in
-                        return keychainEntry.tunnelSettings.relayConstraints
-                }
-                completionHandler(result)
-            } else {
+            guard let accountToken = self.accountToken else {
                 completionHandler(.failure(.missingAccount))
+                return
             }
+
+            let result = Self.loadTunnelSettings(accountToken: accountToken)
+                .map { (keychainEntry) -> RelayConstraints in
+                    return keychainEntry.tunnelSettings.relayConstraints
+            }
+
+            completionHandler(result)
         }
 
         addTunnelControlOperation(operation)
@@ -716,7 +712,7 @@ class TunnelManager {
     /// In order to cancel the observation, either call `removeTunnelObserver(_:)` or simply release
     /// the observer.
     public func addTunnelObserver<T: TunnelObserver>(_ observer: T) {
-        stateLock.withCriticalBlock {
+        dispatchQueue.async {
             let boxed = WeakTunnelObserverBox(observer: observer)
 
             self.tunnelObservers.append(boxed)
@@ -725,7 +721,7 @@ class TunnelManager {
 
     /// Remove tunnel observer.
     public func removeTunnelObserver(_ observer: TunnelObserver) {
-        stateLock.withCriticalBlock {
+        dispatchQueue.async {
             self.tunnelObservers.removeAll { (box) -> Bool in
                 return box.observer === observer
             }
@@ -734,8 +730,8 @@ class TunnelManager {
 
     /// Private helper that loops through the registered observers and calls the given closure
     /// for each of them. Additionally this method takes care of discarding released observers.
-    private func notifyTunnelObservers(block: (TunnelObserver) -> Void) {
-        stateLock.withCriticalBlock {
+    private func notifyTunnelObservers(block: @escaping (TunnelObserver) -> Void) {
+        dispatchQueue.async {
             var discardIndices = [Int]()
 
             self.tunnelObservers.enumerated().forEach { (index, anyObserver) in
@@ -763,22 +759,22 @@ class TunnelManager {
     private var tunnelStateUpdateOperation: Operation?
 
     private func addTunnelControlOperation(_ operation: Operation) {
-        self.stateLock.withCriticalBlock {
+        dispatchQueue.async {
             if let dependency = self.tunnelControlOperation {
                 operation.addDependency(dependency)
             }
             self.tunnelControlOperation = operation
-            operationQueue.addOperation(operation)
+            self.operationQueue.addOperation(operation)
         }
     }
 
     private func addTunnelStateUpdateOperation(_ operation: Operation) {
-        self.stateLock.withCriticalBlock {
+        dispatchQueue.async {
             if let dependency = self.tunnelStateUpdateOperation {
                 operation.addDependency(dependency)
             }
             self.tunnelStateUpdateOperation = operation
-            operationQueue.addOperation(operation)
+            self.operationQueue.addOperation(operation)
         }
     }
 
@@ -930,17 +926,18 @@ class TunnelManager {
     private func mapTunnelState(connectionStatus: NEVPNStatus, completionHandler: @escaping (Result<TunnelState, MapConnectionStatusError>) -> Void) {
         switch connectionStatus {
         case .connected:
-            if let tunnelIpc = tunnelIpc {
-                tunnelIpc.getTunnelInformation { (result) in
-                    self.dispatchQueue.async {
-                        let result = result.map { TunnelState.connected($0) }
-                            .mapError { MapConnectionStatusError.ipcRequest($0) }
-
-                        completionHandler(result)
-                    }
-                }
-            } else {
+            guard let tunnelIpc = tunnelIpc else {
                 completionHandler(.failure(.missingIpc))
+                return
+            }
+
+            tunnelIpc.getTunnelInformation { (result) in
+                self.dispatchQueue.async {
+                    let result = result.map { TunnelState.connected($0) }
+                        .mapError { MapConnectionStatusError.ipcRequest($0) }
+
+                    completionHandler(result)
+                }
             }
 
         case .connecting:
@@ -959,17 +956,18 @@ class TunnelManager {
                 self.loadPublicKey(accountToken: accountToken)
             }
 
-            if let tunnelIpc = tunnelIpc {
-                tunnelIpc.getTunnelInformation { (result) in
-                    self.dispatchQueue.async {
-                        let result = result.map { TunnelState.reconnecting($0) }
-                            .mapError { MapConnectionStatusError.ipcRequest($0) }
-
-                        completionHandler(result)
-                    }
-                }
-            } else {
+            guard let tunnelIpc = tunnelIpc else {
                 completionHandler(.failure(.missingIpc))
+                return
+            }
+
+            tunnelIpc.getTunnelInformation { (result) in
+                self.dispatchQueue.async {
+                    let result = result.map { TunnelState.reconnecting($0) }
+                        .mapError { MapConnectionStatusError.ipcRequest($0) }
+
+                    completionHandler(result)
+                }
             }
 
         case .invalid:

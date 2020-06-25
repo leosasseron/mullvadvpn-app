@@ -107,6 +107,22 @@ class MullvadRpc {
         return MullvadRpc(session: URLSession(configuration: .ephemeral))
     }
 
+    class func makeJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.dataEncodingStrategy = .base64
+        return encoder
+    }
+
+    class func makeJSONDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        decoder.dataDecodingStrategy = .base64
+        return decoder
+    }
+
     init(session: URLSession) {
         self.session = session
     }
@@ -243,7 +259,7 @@ extension MullvadRpc {
 
         private func makeURLRequest() -> Result<URLRequest, MullvadRpc.Error> {
             do {
-                let data = try Self.makeJSONEncoder().encode(request)
+                let data = try MullvadRpc.makeJSONEncoder().encode(request)
 
                 return .success(Self.makeURLRequest(httpBody: data))
             } catch {
@@ -253,7 +269,7 @@ extension MullvadRpc {
 
         private static func decodeResponse(_ responseData: Data) -> Result<Response, MullvadRpc.Error> {
             do {
-                let serverResponse = try Self.makeJSONDecoder()
+                let serverResponse = try MullvadRpc.makeJSONDecoder()
                     .decode(JsonRpcResponse<Response, MullvadRpc.ResponseCode>.self, from: responseData)
 
                 // unwrap JsonRpcResponse.result
@@ -275,22 +291,6 @@ extension MullvadRpc {
             request.httpBody = httpBody
 
             return request
-        }
-
-        private static func makeJSONEncoder() -> JSONEncoder {
-            let encoder = JSONEncoder()
-            encoder.keyEncodingStrategy = .convertToSnakeCase
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.dataEncodingStrategy = .base64
-            return encoder
-        }
-
-        private static func makeJSONDecoder() -> JSONDecoder {
-            let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
-            decoder.dateDecodingStrategy = .iso8601
-            decoder.dataDecodingStrategy = .base64
-            return decoder
         }
     }
 }

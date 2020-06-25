@@ -50,7 +50,7 @@ class AutomaticKeyRotationManager {
     private let persistentKeychainReference: Data
 
     /// A dispatch queue used for synchronization
-    private let dispatchQueue = DispatchQueue(label: "net.mullvad.vpn.key-manager", qos: .background)
+    private let dispatchQueue = DispatchQueue(label: "net.mullvad.vpn.key-manager", qos: .utility)
 
     /// A timer source used to schedule a delayed key rotation
     private var timerSource: DispatchSourceTimer?
