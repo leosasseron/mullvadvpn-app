@@ -113,19 +113,26 @@ protocol TunnelObserver: class {
     func tunnelPublicKeyDidChange(publicKey: WireguardPublicKey?)
 }
 
-private final class WeakTunnelObserverBox: TunnelObserver {
-    private(set) weak var observer: TunnelObserver?
+private class AnyTunnelObserver: WeakObserverBox, TunnelObserver {
 
-    init<T: TunnelObserver>(observer: T) {
-        self.observer = observer
+    typealias Wrapped = TunnelObserver
+
+    private(set) weak var inner: TunnelObserver?
+
+    init<T: TunnelObserver>(_ inner: T) {
+        self.inner = inner
     }
 
     func tunnelStateDidChange(tunnelState: TunnelState) {
-        self.observer?.tunnelStateDidChange(tunnelState: tunnelState)
+        self.inner?.tunnelStateDidChange(tunnelState: tunnelState)
     }
 
     func tunnelPublicKeyDidChange(publicKey: WireguardPublicKey?) {
-        self.observer?.tunnelPublicKeyDidChange(publicKey: publicKey)
+        self.inner?.tunnelPublicKeyDidChange(publicKey: publicKey)
+    }
+
+    static func == (lhs: AnyTunnelObserver, rhs: AnyTunnelObserver) -> Bool {
+        return lhs.inner === rhs.inner
     }
 }
 
@@ -236,7 +243,7 @@ class TunnelManager {
     private var tunnelIpc: PacketTunnelIpc?
 
     private let stateLock = NSLock()
-    private var tunnelObservers = [WeakTunnelObserverBox]()
+    private let observerList = ObserverList<AnyTunnelObserver>()
 
     /// A VPN connection status observer
     private var connectionStatusObserver: NSObjectProtocol?
@@ -256,7 +263,7 @@ class TunnelManager {
             stateLock.withCriticalBlock {
                 _tunnelState = newValue
 
-                notifyTunnelObservers { (observer) in
+                observerList.forEach { (observer) in
                     observer.tunnelStateDidChange(tunnelState: newValue)
                 }
             }
@@ -274,7 +281,7 @@ class TunnelManager {
             stateLock.withCriticalBlock {
                 _publicKey = newValue
 
-                notifyTunnelObservers { (observer) in
+                observerList.forEach { (observer) in
                     observer.tunnelPublicKeyDidChange(publicKey: newValue)
                 }
             }
@@ -708,44 +715,18 @@ class TunnelManager {
 
     // MARK: - Tunnel observeration
 
+    // MARK: - Observation
+
     /// Add tunnel observer.
     /// In order to cancel the observation, either call `removeTunnelObserver(_:)` or simply release
     /// the observer.
-    public func addTunnelObserver<T: TunnelObserver>(_ observer: T) {
-        dispatchQueue.async {
-            let boxed = WeakTunnelObserverBox(observer: observer)
-
-            self.tunnelObservers.append(boxed)
-        }
+    func addObserver<T: TunnelObserver>(_ observer: T) {
+        observerList.append(AnyTunnelObserver(observer))
     }
 
     /// Remove tunnel observer.
-    public func removeTunnelObserver(_ observer: TunnelObserver) {
-        dispatchQueue.async {
-            self.tunnelObservers.removeAll { (box) -> Bool in
-                return box.observer === observer
-            }
-        }
-    }
-
-    /// Private helper that loops through the registered observers and calls the given closure
-    /// for each of them. Additionally this method takes care of discarding released observers.
-    private func notifyTunnelObservers(block: @escaping (TunnelObserver) -> Void) {
-        dispatchQueue.async {
-            var discardIndices = [Int]()
-
-            self.tunnelObservers.enumerated().forEach { (index, anyObserver) in
-                if anyObserver.observer == nil {
-                    discardIndices.append(index)
-                } else {
-                    block(anyObserver)
-                }
-            }
-
-            discardIndices.reversed().forEach { (index) in
-                self.tunnelObservers.remove(at: index)
-            }
-        }
+    func removeObserver<T: TunnelObserver>(_ observer: T) {
+        observerList.remove(AnyTunnelObserver(observer))
     }
 
     // MARK: - Operation management

@@ -38,7 +38,7 @@ class TunnelControlViewController: UIViewController, TunnelObserver {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        TunnelManager.shared.addTunnelObserver(self)
+        TunnelManager.shared.addObserver(self)
         self.didReceiveTunnelState(TunnelManager.shared.tunnelState)
     }
 

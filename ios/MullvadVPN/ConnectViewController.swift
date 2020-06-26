@@ -56,7 +56,7 @@ class ConnectViewController: UIViewController,
 
         connectionPanel.collapseButton.addTarget(self, action: #selector(handleConnectionPanelButton(_:)), for: .touchUpInside)
 
-        TunnelManager.shared.addTunnelObserver(self)
+        TunnelManager.shared.addObserver(self)
         self.tunnelState = TunnelManager.shared.tunnelState
     }
 

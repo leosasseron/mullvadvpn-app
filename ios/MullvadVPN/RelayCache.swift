@@ -46,19 +46,23 @@ protocol RelayCacheObserver: class {
     func relayCache(_ relayCache: RelayCache, didUpdateCachedRelayList cachedRelayList: CachedRelayList)
 }
 
-/// A type-erasing weak container for `RelayCacheObserver`
-private class WeakRelayCacheObserverBox: RelayCacheObserver {
+private class AnyRelayCacheObserver: WeakObserverBox, RelayCacheObserver {
+    
+    typealias Wrapped = RelayCacheObserver
 
-    private(set) weak var observer: RelayCacheObserver?
+    private(set) weak var inner: RelayCacheObserver?
 
-    init<T: RelayCacheObserver>(observer: T) {
-        self.observer = observer
+    init<T: RelayCacheObserver>(_ inner: T) {
+        self.inner = inner
     }
 
     func relayCache(_ relayCache: RelayCache, didUpdateCachedRelayList cachedRelayList: CachedRelayList) {
-        observer?.relayCache(relayCache, didUpdateCachedRelayList: cachedRelayList)
+        inner?.relayCache(relayCache, didUpdateCachedRelayList: cachedRelayList)
     }
 
+    static func == (lhs: AnyRelayCacheObserver, rhs: AnyRelayCacheObserver) -> Bool {
+        return lhs.inner === rhs.inner
+    }
 }
 
 class RelayCache {
@@ -94,7 +98,7 @@ class RelayCache {
     }
 
     /// Observers
-    private var observers = [WeakRelayCacheObserverBox]()
+    private let observerList = ObserverList<AnyRelayCacheObserver>()
 
     /// A shared instance of `RelayCache`
     static let shared = RelayCache(cacheFileURL: defaultCacheFileURL, networkSession: URLSession(configuration: .ephemeral))
@@ -182,35 +186,11 @@ class RelayCache {
     // MARK: - Observation
 
     func addObserver<T: RelayCacheObserver>(_ observer: T) {
-        dispatchQueue.async {
-            self.observers.append(WeakRelayCacheObserverBox(observer: observer))
-        }
+        observerList.append(AnyRelayCacheObserver(observer))
     }
 
-    func removeObserver(_ observer: RelayCacheObserver) {
-        dispatchQueue.async {
-            self.observers.removeAll { (box) -> Bool in
-                return box.observer === observer
-            }
-        }
-    }
-
-    private func notifyObservers(block: @escaping (RelayCacheObserver) -> Void) {
-        dispatchQueue.async {
-            var discardIndices = [Int]()
-
-            self.observers.enumerated().forEach { (index, anyObserver) in
-                if anyObserver.observer == nil {
-                    discardIndices.append(index)
-                } else {
-                    block(anyObserver)
-                }
-            }
-
-            discardIndices.reversed().forEach { (index) in
-                self.observers.remove(at: index)
-            }
-        }
+    func removeObserver<T: RelayCacheObserver>(_ observer: T) {
+        observerList.remove(AnyRelayCacheObserver(observer))
     }
 
     // MARK: - Private instance methods
@@ -228,7 +208,7 @@ class RelayCache {
             case .success(let cachedRelayList):
                 os_log(.default, "Downloaded %d relays", cachedRelayList.relayList.numRelays)
 
-                self.notifyObservers { (observer) in
+                self.observerList.forEach { (observer) in
                     observer.relayCache(self, didUpdateCachedRelayList: cachedRelayList)
                 }
 

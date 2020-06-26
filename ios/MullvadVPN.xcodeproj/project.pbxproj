@@ -112,6 +112,8 @@
 		58C6B36122C0EC82003C19AD /* AnyIPEndpoint+DNS64.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C6B36022C0EC82003C19AD /* AnyIPEndpoint+DNS64.swift */; };
 		58C6B36522C10596003C19AD /* AnyIPEndpoint+Wireguard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C6B36422C10596003C19AD /* AnyIPEndpoint+Wireguard.swift */; };
 		58C6B36722C106FC003C19AD /* WireguardCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58C6B36622C106FC003C19AD /* WireguardCommand.swift */; };
+		58CC40EF24A601900019D96E /* ObserverList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CC40EE24A601900019D96E /* ObserverList.swift */; };
+		58CC40F024A602780019D96E /* ObserverList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CC40EE24A601900019D96E /* ObserverList.swift */; };
 		58CCA010224249A1004F3011 /* ConnectViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CCA00F224249A1004F3011 /* ConnectViewController.swift */; };
 		58CCA01222424D11004F3011 /* SettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CCA01122424D11004F3011 /* SettingsViewController.swift */; };
 		58CCA0162242560B004F3011 /* UIColor+Palette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58CCA0152242560B004F3011 /* UIColor+Palette.swift */; };
@@ -271,6 +273,7 @@
 		58C6B36022C0EC82003C19AD /* AnyIPEndpoint+DNS64.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AnyIPEndpoint+DNS64.swift"; sourceTree = "<group>"; };
 		58C6B36422C10596003C19AD /* AnyIPEndpoint+Wireguard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AnyIPEndpoint+Wireguard.swift"; sourceTree = "<group>"; };
 		58C6B36622C106FC003C19AD /* WireguardCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireguardCommand.swift; sourceTree = "<group>"; };
+		58CC40EE24A601900019D96E /* ObserverList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObserverList.swift; sourceTree = "<group>"; };
 		58CCA00F224249A1004F3011 /* ConnectViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectViewController.swift; sourceTree = "<group>"; };
 		58CCA01122424D11004F3011 /* SettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewController.swift; sourceTree = "<group>"; };
 		58CCA0152242560B004F3011 /* UIColor+Palette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIColor+Palette.swift"; sourceTree = "<group>"; };
@@ -491,6 +494,7 @@
 				58C6B35322BB87C4003C19AD /* WireguardPrivateKey.swift */,
 				58F3C098249B978C003E76BE /* x25519.c */,
 				58F3C097249B978C003E76BE /* x25519.h */,
+				58CC40EE24A601900019D96E /* ObserverList.swift */,
 			);
 			path = MullvadVPN;
 			sourceTree = "<group>";
@@ -842,6 +846,7 @@
 				581CBCEC2298041B00727D7F /* SettingsAppVersionCell.swift in Sources */,
 				58FAEDFD24533A5500CB0F5B /* KeychainMatchLimit.swift in Sources */,
 				5840250422B11AB700E4CFEC /* MullvadEndpoint.swift in Sources */,
+				58CC40EF24A601900019D96E /* ObserverList.swift in Sources */,
 				58CCA01822426713004F3011 /* AccountViewController.swift in Sources */,
 				58F3C099249B978C003E76BE /* x25519.c in Sources */,
 				5868585524054096000B8131 /* AppButton.swift in Sources */,
@@ -920,6 +925,7 @@
 				58B8743B22B788D200015324 /* PacketTunnelSettingsGenerator.swift in Sources */,
 				5860F1EB23AA4CF300CEA666 /* Logging.swift in Sources */,
 				5860F1C223A785C600CEA666 /* WireguardDevice.swift in Sources */,
+				58CC40F024A602780019D96E /* ObserverList.swift in Sources */,
 				58C6B35522BB87C4003C19AD /* WireguardPrivateKey.swift in Sources */,
 				58FAEE0424533AC000CB0F5B /* KeychainClass.swift in Sources */,
 				58AEEF6C2344A49D00C9BBD5 /* TunnelSettingsManager.swift in Sources */,

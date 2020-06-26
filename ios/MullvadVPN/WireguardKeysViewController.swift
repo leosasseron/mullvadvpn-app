@@ -45,7 +45,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        TunnelManager.shared.addTunnelObserver(self)
+        TunnelManager.shared.addObserver(self)
         updatePublicKey(publicKey: TunnelManager.shared.publicKey, animated: false)
 
         startPublicKeyPeriodicUpdate()
