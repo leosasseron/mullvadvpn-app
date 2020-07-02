@@ -84,9 +84,6 @@ class WireguardDevice {
     /// Active configuration
     private var configuration: WireguardConfiguration?
 
-    /// Active configuration with resolved endpoints
-    private var resolvedConfiguration: WireguardConfiguration?
-
     /// Returns a Wireguard version
     class var version: String {
         String(cString: wgVersion())
@@ -150,7 +147,6 @@ class WireguardDevice {
             if handle >= 0 {
                 self.wireguardHandle = handle
                 self.configuration = configuration
-                self.resolvedConfiguration = resolvedConfiguration
 
                 self.startNetworkMonitor()
 
@@ -180,13 +176,12 @@ class WireguardDevice {
     func setConfiguration(_ newConfiguration: WireguardConfiguration, completionHandler: @escaping (Result<(), Error>) -> Void) {
         workQueue.async {
             if let handle = self.wireguardHandle {
-                let newResolvedConfiguration = Self.resolveConfiguration(newConfiguration)
-                let commands = newResolvedConfiguration.uapiConfiguration()
+                let resolvedConfiguration = Self.resolveConfiguration(newConfiguration)
+                let commands = resolvedConfiguration.uapiConfiguration()
 
                 Self.setWireguardConfig(handle: handle, commands: commands)
 
                 self.configuration = newConfiguration
-                self.resolvedConfiguration = newResolvedConfiguration
 
                 completionHandler(.success(()))
             } else {
@@ -300,11 +295,10 @@ class WireguardDevice {
 
             // Re-resolve endpoints on network changes
             if let currentConfiguration = self.configuration {
-                let newResolvedConfiguration = Self.resolveConfiguration(currentConfiguration)
-                let commands = newResolvedConfiguration.endpointUapiConfiguration()
+                let resolvedConfiguration = Self.resolveConfiguration(currentConfiguration)
+                let commands = resolvedConfiguration.endpointUapiConfiguration()
 
                 Self.setWireguardConfig(handle: handle, commands: commands)
-                self.resolvedConfiguration = newResolvedConfiguration
             }
 
             // Tell Wireguard to re-open sockets and bind them to the new network interface

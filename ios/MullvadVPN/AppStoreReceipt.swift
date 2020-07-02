@@ -59,14 +59,11 @@ enum AppStoreReceipt {
         let startRefreshRequest = {
             let request = SKReceiptRefreshRequest(receiptProperties: receiptProperties)
             let refreshOperation = ReceiptRefreshOperation(request: request)
-
-            refreshOperation.completionBlock = {
-                if let output = refreshOperation.output {
-                    let result = output
-                        .mapError { Error.refresh($0) }
-                        .flatMap { Self.readFromDisk() }
-                    completionHandler(result)
-                }
+            refreshOperation.addDidFinishBlockObserver { (operation, result) in
+                let result = result
+                    .mapError { Error.refresh($0) }
+                    .flatMap { Self.readFromDisk() }
+                completionHandler(result)
             }
 
             operationQueue.addOperation(refreshOperation)
@@ -92,7 +89,9 @@ enum AppStoreReceipt {
 }
 
 
-private class ReceiptRefreshOperation: AsyncOutputOperation<Result<(), Error>>, SKRequestDelegate {
+private class ReceiptRefreshOperation: AsyncOperation, OutputOperation, SKRequestDelegate {
+    typealias Output = Result<(), Error>
+
     private let request: SKReceiptRefreshRequest
 
     init(request: SKReceiptRefreshRequest) {
@@ -106,9 +105,7 @@ private class ReceiptRefreshOperation: AsyncOutputOperation<Result<(), Error>>, 
         request.start()
     }
 
-    override func cancel() {
-        super.cancel()
-
+    override func operationDidCancel() {
         request.cancel()
     }
 

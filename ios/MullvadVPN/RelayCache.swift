@@ -82,7 +82,7 @@ class RelayCache {
     private var isPeriodicUpdatesEnabled = false
 
     /// A download task used for relay RPC request
-    private var downloadTask: URLSessionTask?
+    private var downloadRequest: MullvadRpc.Request<RelayList>?
 
     /// The default cache file location
     static var defaultCacheFileURL: URL {
@@ -125,7 +125,7 @@ class RelayCache {
                 }
 
             case .failure(let readError):
-                os_log(.error, "%{public}s", readError.displayChain(message: "Failed to read the relay cache"))
+                readError.logChain(message: "Failed to read the relay cache")
 
                 if Self.shouldDownloadRelaysOnReadFailure(readError) {
                     self.scheduleRepeatingTimer(startTime: .now())
@@ -142,7 +142,7 @@ class RelayCache {
 
             self.timerSource?.cancel()
             self.timerSource = nil
-            self.downloadTask?.cancel()
+            self.downloadRequest?.cancel()
 
             completionHandler?()
         }
@@ -159,7 +159,7 @@ class RelayCache {
                 }
 
             case .failure(let readError):
-                os_log(.error, "%{public}s", readError.displayChain(message: "Failed to read the relay cache"))
+                readError.logChain(message: "Failed to read the relay cache")
 
                 if Self.shouldDownloadRelaysOnReadFailure(readError) {
                     self.downloadRelays()
@@ -196,7 +196,7 @@ class RelayCache {
     // MARK: - Private instance methods
 
     private func downloadRelays() {
-        let newDownloadTask = makeDownloadTask { (result) in
+        let newDownloadRequest = makeDownloadTask { (result) in
             let result = result.flatMap { (relayList) -> Result<CachedRelayList, RelayCacheError> in
                 let cachedRelayList = CachedRelayList(relayList: relayList, updatedAt: Date())
 
@@ -213,14 +213,12 @@ class RelayCache {
                 }
 
             case .failure(let error):
-                os_log(.error, "%{public}s", error.displayChain(message: "Failed to update the relays"))
+                error.logChain(message: "Failed to update the relays")
             }
         }
 
-        downloadTask?.cancel()
-        downloadTask = newDownloadTask
-
-        newDownloadTask?.resume()
+        downloadRequest?.cancel()
+        downloadRequest = newDownloadRequest
     }
 
     private func scheduleRepeatingTimer(startTime: DispatchWallTime) {
@@ -235,8 +233,10 @@ class RelayCache {
         self.timerSource = timerSource
     }
 
-    private func makeDownloadTask(completionHandler: @escaping (Result<RelayList, RelayCacheError>) -> Void) -> URLSessionTask? {
-        let urlSessionTask = rpc.getRelayList().dataTask { (result) in
+    private func makeDownloadTask(completionHandler: @escaping (Result<RelayList, RelayCacheError>) -> Void) -> MullvadRpc.Request<RelayList>? {
+        let request = rpc.getRelayList()
+
+        request.start { (result) in
             self.dispatchQueue.async {
                 let result = result
                     .map(Self.filterRelayList)
@@ -246,7 +246,7 @@ class RelayCache {
             }
         }
 
-        return urlSessionTask
+        return request
     }
 
     // MARK: - Private class methods

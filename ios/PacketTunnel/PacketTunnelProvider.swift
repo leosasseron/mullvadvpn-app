@@ -99,6 +99,10 @@ extension PacketTunnelConfiguration {
 
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
+    enum OperationCategory {
+        case exclusive
+    }
+
     /// Active wireguard device
     private var wireguardDevice: WireguardDevice?
 
@@ -115,7 +119,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         operationQueue.underlyingQueue = self.dispatchQueue
         return operationQueue
     }()
-    private var lastExclusiveOperation: Operation?
+    private lazy var exclusivityController: ExclusivityController<OperationCategory> = {
+        return ExclusivityController(operationQueue: self.operationQueue)
+    }()
 
     private var keyRotationManager: AutomaticKeyRotationManager?
 
@@ -138,7 +144,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                         self.pendingStartCompletion?(nil)
 
                     case .failure(let error):
-                        os_log(.error, log: tunnelProviderLog, "%{public}s", error.displayChain())
+                        error.logChain(log: tunnelProviderLog)
                         self.pendingStartCompletion?(error)
                     }
 
@@ -147,22 +153,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             }
 
             self.pendingStartCompletion = completionHandler
-            self.addExclusiveOperation(operation)
+            self.exclusivityController.addOperation(operation, categories: [.exclusive])
         }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
-        dispatchQueue.async {
-            let operation = AsyncBlockOperation { (finish) in
-                os_log(.default, log: tunnelProviderLog, "Stop the tunnel. Reason: %{public}s", "\(reason)")
+        let operation = AsyncBlockOperation { (finish) in
+            os_log(.default, log: tunnelProviderLog, "Stop the tunnel. Reason: %{public}s", "\(reason)")
 
-                self.doStopTunnel {
-                    completionHandler()
-                }
+            self.doStopTunnel {
+                completionHandler()
             }
-
-            self.addExclusiveOperation(operation)
         }
+
+        exclusivityController.addOperation(operation, categories: [.exclusive])
     }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
@@ -178,7 +182,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     completionHandler?(data)
 
                 case .failure(let error):
-                    os_log(.error, log: tunnelProviderLog, "%{public}s", error.displayChain())
+                    error.logChain(log: tunnelProviderLog)
                     completionHandler?(nil)
                 }
             }
@@ -248,7 +252,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                                         break
 
                                     case .failure(let error):
-                                        os_log(.error, log: tunnelProviderLog, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
+                                        error.logChain(message: "Failed to reload tunnel settings", log: tunnelProviderLog)
                                     }
                                 }
                             }
@@ -282,8 +286,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                     self.keyRotationManager = nil
 
                     if case .failure(let error) = result {
-                        os_log(.error, log: tunnelProviderLog, "%{public}s",
-                               error.displayChain(message: "Failed to stop the tunnel"))
+                        error.logChain(message: "Failed to stop the tunnel", log: tunnelProviderLog)
                     }
 
                     // Ignore all errors at this point
@@ -396,24 +399,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func reloadTunnelSettings(completionHandler: @escaping (Result<(), PacketTunnelProviderError>) -> Void) {
-        let operation = AsyncBlockOperation { (finish) in
+        let operation = ResultOperation<(), PacketTunnelProviderError> { (finish) in
             self.doReloadTunnelSettings { (result) in
-                completionHandler(result)
-                finish()
+                finish(result)
             }
         }
 
-        addExclusiveOperation(operation)
-    }
-
-    private func addExclusiveOperation(_ operation: Operation) {
-        if let dependency = self.lastExclusiveOperation {
-            operation.addDependency(dependency)
+        operation.addDidFinishBlockObserver { (operation, result) in
+            self.dispatchQueue.async {
+                completionHandler(result)
+            }
         }
 
-        self.lastExclusiveOperation = operation
-
-        operationQueue.addOperation(operation)
+        exclusivityController.addOperation(operation, categories: [.exclusive])
     }
 
     /// Returns a `PacketTunnelConfig` that contains the tunnel configuration and selected relay

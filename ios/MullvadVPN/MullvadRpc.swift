@@ -145,6 +145,10 @@ class MullvadRpc {
         return MullvadRpc.Request(session: session, request: request)
     }
 
+    func getAccountExpiry(request: MullvadRpc.Request<Date>? = nil) -> MullvadRpc.Operation<Date> {
+        return MullvadRpc.Operation(request: request)
+    }
+
     func pushWireguardKey(accountToken: String, publicKey: Data) -> MullvadRpc.Request<WireguardAssociatedAddresses> {
         let request = JsonRpcRequest(method: "push_wg_key", params: [
             AnyEncodable(accountToken),
@@ -223,38 +227,56 @@ extension JsonRpcResponseError: LocalizedError
 
 
 extension MullvadRpc {
-    class Request<Response> where Response: Decodable {
-        typealias DataTaskCompletionHandler = (Result<Response, MullvadRpc.Error>) -> Void
+
+    class Request<Response: Decodable> {
+        typealias RequestCompletionHandler = (Result<Response, MullvadRpc.Error>) -> Void
 
         private let session: URLSession
         private let request: JsonRpcRequest
+
+        private let lock = NSLock()
+        private var urlSessionTask: URLSessionTask?
 
         fileprivate init(session: URLSession, request: JsonRpcRequest) {
             self.session = session
             self.request = request
         }
 
-        func dataTask(completionHandler: @escaping DataTaskCompletionHandler) -> URLSessionDataTask?
-        {
-            switch makeURLRequest() {
-            case .success(let urlRequest):
-                return session.dataTask(with: urlRequest) { (responseData, urlResponse, error) in
-                    switch (responseData, error) {
-                    case (.some(let data), .none):
-                        completionHandler(Self.decodeResponse(data))
+        func start(completionHandler: @escaping RequestCompletionHandler) {
+            lock.withCriticalBlock {
+                assert(self.urlSessionTask == nil)
 
-                    case (.none, .some(let urlError as URLError)):
-                        completionHandler(.failure(.network(urlError)))
+                switch makeURLRequest() {
+                case .success(let urlRequest):
+                    let task = session.dataTask(with: urlRequest) { (responseData, urlResponse, error) in
+                        switch (responseData, error) {
+                        case (.some(let data), .none):
+                            completionHandler(Self.decodeResponse(data))
 
-                    default:
-                        fatalError()
+                        case (.none, .some(let urlError as URLError)):
+                            completionHandler(.failure(.network(urlError)))
+
+                        default:
+                            fatalError()
+                        }
                     }
-                }
-            case .failure(let error):
-                completionHandler(.failure(error))
+                    self.urlSessionTask = task
+                    task.resume()
 
-                return nil
+                case .failure(let error):
+                    completionHandler(.failure(error))
+                }
             }
+        }
+
+        func cancel() {
+            lock.withCriticalBlock {
+                self.urlSessionTask?.cancel()
+            }
+        }
+
+        func operation() -> MullvadRpc.Operation<Response> {
+            return MullvadRpc.Operation(request: self)
         }
 
         private func makeURLRequest() -> Result<URLRequest, MullvadRpc.Error> {
@@ -291,6 +313,31 @@ extension MullvadRpc {
             request.httpBody = httpBody
 
             return request
+        }
+    }
+
+    class Operation<Response>: AsyncOperation, InputOperation, OutputOperation where Response: Decodable {
+        typealias Input = Request<Response>
+        typealias Output = Result<Response, MullvadRpc.Error>
+
+        init(request: Input? = nil) {
+            super.init()
+            self.input = request
+        }
+
+        override func main() {
+            guard let request = self.input else {
+                self.finish()
+                return
+            }
+
+            request.start { [weak self] (result) in
+                self?.finish(with: result)
+            }
+        }
+
+        override func operationDidCancel() {
+            input?.cancel()
         }
     }
 }

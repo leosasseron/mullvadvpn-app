@@ -38,38 +38,51 @@ protocol AppStorePaymentObserver: class {
     func appStorePaymentManager(
         _ manager: AppStorePaymentManager,
         transaction: SKPaymentTransaction,
+        accountToken: String?,
         didFailWithError error: AppStorePaymentManager.Error)
 
     func appStorePaymentManager(
         _ manager: AppStorePaymentManager,
         transaction: SKPaymentTransaction,
+        accountToken: String,
         didFinishWithResponse response: SendAppStoreReceiptResponse)
 }
 
 /// A type-erasing weak container for `AppStorePaymentObserver`
-private class WeakAppStorePaymentObserverBox: AppStorePaymentObserver {
-    private(set) weak var observer: AppStorePaymentObserver?
+private class AnyAppStorePaymentObserver: WeakObserverBox, Equatable {
+    private(set) weak var inner: AppStorePaymentObserver?
 
-    init<T: AppStorePaymentObserver>(observer: T) {
-        self.observer = observer
+    init<T: AppStorePaymentObserver>(_ inner: T) {
+        self.inner = inner
     }
 
     func appStorePaymentManager(_ manager: AppStorePaymentManager,
                                 transaction: SKPaymentTransaction,
+                                accountToken: String?,
                                 didFailWithError error: AppStorePaymentManager.Error)
     {
-        self.observer?.appStorePaymentManager(manager, transaction: transaction, didFailWithError: error)
+        self.inner?.appStorePaymentManager(
+            manager,
+            transaction: transaction,
+            accountToken: accountToken,
+            didFailWithError: error)
     }
 
     func appStorePaymentManager(_ manager: AppStorePaymentManager,
                                 transaction: SKPaymentTransaction,
+                                accountToken: String,
                                 didFinishWithResponse response: SendAppStoreReceiptResponse)
     {
-        self.observer?.appStorePaymentManager(manager,
-                                         transaction: transaction,
-                                         didFinishWithResponse: response)
+        self.inner?.appStorePaymentManager(
+            manager,
+            transaction: transaction,
+            accountToken: accountToken,
+            didFinishWithResponse: response)
     }
 
+    static func == (lhs: AnyAppStorePaymentObserver, rhs: AnyAppStorePaymentObserver) -> Bool {
+        return lhs.inner === rhs.inner
+    }
 }
 
 protocol AppStorePaymentManagerDelegate: class {
@@ -109,7 +122,7 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
     private let queue: SKPaymentQueue
     private let rpc = MullvadRpc.withEphemeralURLSession()
 
-    private var observers = [WeakAppStorePaymentObserverBox]()
+    private var observerList = ObserverList<AnyAppStorePaymentObserver>()
     private let lock = NSRecursiveLock()
 
     private weak var classDelegate: AppStorePaymentManagerDelegate?
@@ -153,37 +166,11 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
     // MARK: - Payment observation
 
     func addPaymentObserver<T: AppStorePaymentObserver>(_ observer: T) {
-        lock.withCriticalBlock {
-            let boxed = WeakAppStorePaymentObserverBox(observer: observer)
-
-            self.observers.append(boxed)
-        }
+        self.observerList.append(AnyAppStorePaymentObserver(observer))
     }
 
-    func removePaymentObserver(_ observer: AppStorePaymentObserver) {
-        lock.withCriticalBlock {
-            self.observers.removeAll { (box) -> Bool in
-                return box.observer === observer
-            }
-        }
-    }
-
-    private func enumerateObservers(_ block: (AppStorePaymentObserver) -> Void) {
-        lock.withCriticalBlock {
-            var discardIndices = [Int]()
-
-            self.observers.enumerated().forEach { (index, anyObserver) in
-                if anyObserver.observer == nil {
-                    discardIndices.append(index)
-                } else {
-                    block(anyObserver)
-                }
-            }
-
-            discardIndices.reversed().forEach { (index) in
-                self.observers.remove(at: index)
-            }
-        }
+    func removePaymentObserver<T: AppStorePaymentObserver>(_ observer: T) {
+        observerList.remove(AnyAppStorePaymentObserver(observer))
     }
 
     // MARK: - Account token and payment mapping
@@ -214,10 +201,9 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
         let productIdentifiers = productIdentifiers.productIdentifiersSet
         let request = SKProductsRequest(productIdentifiers: productIdentifiers)
         let operation = ProductsRequestOperation(request: request)
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
         operationQueue.addOperation(operation)
@@ -250,7 +236,7 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
                     receiptData: receiptData
                 )
 
-                let urlSessionTask = request.dataTask { (result) in
+                request.start { (result) in
                     switch result {
                     case .success(let response):
                         os_log(
@@ -264,8 +250,6 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
                         completionHandler(.failure(.sendReceipt(error)))
                     }
                 }
-
-                urlSessionTask?.resume()
 
             case .failure(let error):
                 completionHandler(.failure(.readReceipt(error)))
@@ -307,22 +291,34 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
     private func didFailPurchase(transaction: SKPaymentTransaction) {
         queue.finishTransaction(transaction)
 
-        enumerateObservers { (observer) in
+        guard let accountToken = deassociateAccountToken(transaction.payment) else {
+            observerList.forEach { (observer) in
+                observer.appStorePaymentManager(
+                    self,
+                    transaction: transaction,
+                    accountToken: nil,
+                    didFailWithError: .noAccountSet)
+            }
+            return
+        }
+
+        observerList.forEach { (observer) in
             observer.appStorePaymentManager(
                 self,
                 transaction: transaction,
+                accountToken: accountToken,
                 didFailWithError: .storePayment(transaction.error!))
         }
 
-        _ = deassociateAccountToken(transaction.payment)
     }
 
     private func didFinishOrRestorePurchase(transaction: SKPaymentTransaction) {
         guard let accountToken = deassociateAccountToken(transaction.payment) else {
-            enumerateObservers { (observer) in
+            observerList.forEach { (observer) in
                 observer.appStorePaymentManager(
                     self,
                     transaction: transaction,
+                    accountToken: nil,
                     didFailWithError: .noAccountSet)
             }
             return
@@ -334,20 +330,22 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
                 case .success(let response):
                     self.queue.finishTransaction(transaction)
 
-                    self.enumerateObservers { (observer) in
+                    self.observerList.forEach { (observer) in
                         observer.appStorePaymentManager(
                             self,
                             transaction: transaction,
+                            accountToken: accountToken,
                             didFinishWithResponse: response)
                     }
 
                 case .failure(let error):
-                    os_log("%{public}s", error.displayChain(message: "Failed to upload the AppStore receipt"))
+                    error.logChain(message: "Failed to upload the AppStore receipt")
 
-                    self.enumerateObservers { (observer) in
+                    self.observerList.forEach { (observer) in
                         observer.appStorePaymentManager(
                             self,
                             transaction: transaction,
+                            accountToken: accountToken,
                             didFailWithError: error)
                     }
                 }
@@ -357,8 +355,11 @@ class AppStorePaymentManager: NSObject, SKPaymentTransactionObserver {
 
 }
 
-private class ProductsRequestOperation: AsyncOutputOperation<Result<SKProductsResponse, Error>>, SKProductsRequestDelegate {
+private class ProductsRequestOperation: AsyncOperation, OutputOperation, SKProductsRequestDelegate {
+    typealias Output = Result<SKProductsResponse, Error>
+
     private let request: SKProductsRequest
+//    var output: Result<SKProductsResponse, Error>?
 
     init(request: SKProductsRequest) {
         self.request = request
@@ -371,16 +372,13 @@ private class ProductsRequestOperation: AsyncOutputOperation<Result<SKProductsRe
         request.start()
     }
 
-    override func cancel() {
-        super.cancel()
-
+    override func operationDidCancel() {
         request.cancel()
     }
 
     // - MARK: SKProductsRequestDelegate
 
     func requestDidFinish(_ request: SKRequest) {
-        //finish(with: .success(()))
         // no-op
     }
 

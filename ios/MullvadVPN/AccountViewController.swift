@@ -230,31 +230,30 @@ class AccountViewController: UIViewController, AppStorePaymentObserver {
             message: message,
             preferredStyle: .alert)
 
-        alertPresenter.enqueue(alertController, presentingController: self)
+        alertPresenter.enqueue(alertController, presentingController: self) {
+            Account.shared.logout { (result) in
+                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(1)) {
+                    alertController.dismiss(animated: true) {
+                        switch result {
+                        case .failure(let error):
+                            error.logChain(message: "Failed to log out")
 
-        Account.shared.logout { (result) in
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(1)) {
-                alertController.dismiss(animated: true) {
-                    switch result {
-                    case .failure(let error):
-                        os_log(.error, "%{public}s",
-                               error.displayChain(message: "Failed to log out"))
+                            let errorAlertController = UIAlertController(
+                                title: NSLocalizedString("Failed to log out", comment: ""),
+                                message: error.errorChainDescription,
+                                preferredStyle: .alert
+                            )
+                            errorAlertController.addAction(
+                                UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
+                            )
+                            self.alertPresenter.enqueue(errorAlertController, presentingController: self)
 
-                        let errorAlertController = UIAlertController(
-                            title: NSLocalizedString("Failed to log out", comment: ""),
-                            message: error.errorChainDescription,
-                            preferredStyle: .alert
-                        )
-                        errorAlertController.addAction(
-                            UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
-                        )
-                        self.alertPresenter.enqueue(errorAlertController, presentingController: self)
-
-                    case .success:
-                        self.performSegue(
-                            withIdentifier: SegueIdentifier.Account.logout.rawValue,
-                            sender: self
-                        )
+                        case .success:
+                            self.performSegue(
+                                withIdentifier: SegueIdentifier.Account.logout.rawValue,
+                                sender: self
+                            )
+                        }
                     }
                 }
             }
@@ -263,7 +262,7 @@ class AccountViewController: UIViewController, AppStorePaymentObserver {
 
     // MARK: - AppStorePaymentObserver
 
-    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, didFailWithError error: AppStorePaymentManager.Error) {
+    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, accountToken: String?, didFailWithError error: AppStorePaymentManager.Error) {
         DispatchQueue.main.async {
             let alertController = UIAlertController(
                 title: NSLocalizedString("Cannot complete the purchase", comment: ""),
@@ -283,7 +282,7 @@ class AccountViewController: UIViewController, AppStorePaymentObserver {
         }
     }
 
-    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, didFinishWithResponse response: SendAppStoreReceiptResponse) {
+    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, accountToken: String, didFinishWithResponse response: SendAppStoreReceiptResponse) {
         DispatchQueue.main.async {
             self.showTimeAddedConfirmationAlert(with: response, context: .purchase)
 

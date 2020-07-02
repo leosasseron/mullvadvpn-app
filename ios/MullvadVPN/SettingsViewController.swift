@@ -35,7 +35,7 @@ class SettingsViewController: UITableViewController {
             queue: OperationQueue.main) { [weak self] (note) in
                 guard let accountRow = self?.accountRow else { return }
 
-                self?.staticDataSource.reloadRows([accountRow], with: .automatic)
+                self?.staticDataSource.reloadRows([accountRow], with: .none)
         }
 
         setupDataSource()

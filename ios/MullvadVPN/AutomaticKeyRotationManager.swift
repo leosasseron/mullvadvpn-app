@@ -61,8 +61,8 @@ class AutomaticKeyRotationManager {
     /// Internal variable indicating that the key rotation has already started
     private var isAutomaticRotationEnabled = false
 
-    /// An URLSessionTask for replacing the key on server
-    private var urlSessionTask: URLSessionTask?
+    /// An RPC request for replacing the key on server
+    private var request: MullvadRpc.Request<WireguardAssociatedAddresses>?
 
     /// A variable backing the `eventHandler` public property
     private var _eventHandler: ((KeyRotationResult) -> Void)?
@@ -106,8 +106,8 @@ class AutomaticKeyRotationManager {
 
             self.isAutomaticRotationEnabled = false
 
-            self.urlSessionTask?.cancel()
-            self.urlSessionTask = nil
+            self.request?.cancel()
+            self.request = nil
 
             self.timerSource?.cancel()
 
@@ -123,7 +123,7 @@ class AutomaticKeyRotationManager {
             let currentPrivateKey = keychainEntry.tunnelSettings.interface.privateKey
 
             if Self.shouldRotateKey(creationDate: currentPrivateKey.creationDate) {
-                let urlSessionTask = replaceKey(accountToken: keychainEntry.accountToken, oldPublicKey: currentPrivateKey.publicKey) { (result) in
+                let request = replaceKey(accountToken: keychainEntry.accountToken, oldPublicKey: currentPrivateKey.publicKey) { (result) in
                     let result = result.map { (tunnelSettings) -> KeyRotationResult in
                         let newPrivateKey = tunnelSettings.interface.privateKey
 
@@ -137,9 +137,7 @@ class AutomaticKeyRotationManager {
                     self.didCompleteKeyRotation(result: result)
                 }
 
-                self.urlSessionTask = urlSessionTask
-
-                urlSessionTask?.resume()
+                self.request = request
             } else {
                 let event = KeyRotationResult(
                     isNew: false,
@@ -158,7 +156,7 @@ class AutomaticKeyRotationManager {
     private func replaceKey(
         accountToken: String,
         oldPublicKey: WireguardPublicKey,
-        completionHandler: @escaping (Result<TunnelSettings, Error>) -> Void) -> URLSessionTask?
+        completionHandler: @escaping (Result<TunnelSettings, Error>) -> Void) -> MullvadRpc.Request<WireguardAssociatedAddresses>
     {
         let newPrivateKey = WireguardPrivateKey()
 
@@ -168,7 +166,7 @@ class AutomaticKeyRotationManager {
             newPublicKey: newPrivateKey.publicKey.rawRepresentation
         )
 
-        return request.dataTask { (result) in
+        request.start { (result) in
             self.dispatchQueue.async {
                 let updateResult = result.mapError { (error) -> Error in
                     return .rpc(error)
@@ -178,6 +176,8 @@ class AutomaticKeyRotationManager {
                 completionHandler(updateResult)
             }
         }
+
+        return request
     }
 
     private func updateTunnelSettings(privateKey: WireguardPrivateKey, addresses: WireguardAssociatedAddresses) -> Result<TunnelSettings, Error> {

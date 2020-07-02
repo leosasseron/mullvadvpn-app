@@ -210,8 +210,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
                         UIAlertAction(title: NSLocalizedString("OK", comment: ""), style: .cancel)
                     )
 
-                    os_log(.error, "%{public}s",
-                           error.displayChain(message: "Failed to regenerate the private key"))
+                    error.logChain(message: "Failed to regenerate the private key")
 
                     self.alertPresenter.enqueue(alertController, presentingController: self)
                 }

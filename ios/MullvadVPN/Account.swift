@@ -18,6 +18,9 @@ private enum UserDefaultsKeys: String {
     case accountExpiry = "accountExpiry"
 }
 
+/// The exclusive operation category used by `Account`
+private let kExclusiveOperationCategory = "Exclusive"
+
 /// A class that groups the account related operations
 class Account {
 
@@ -38,8 +41,8 @@ class Account {
     /// A notification userInfo key that holds the `Date` with the new account expiry
     static let newAccountExpiryUserInfoKey = "newAccountExpiry"
 
+    /// A shared instance of `Account`
     static let shared = Account()
-    private let rpc = MullvadRpc.withEphemeralURLSession()
 
     /// Returns true if user agreed to terms of service, otherwise false
     var isAgreedToTermsOfService: Bool {
@@ -47,8 +50,13 @@ class Account {
     }
 
     /// Returns the currently used account token
-    var token: String? {
-        return UserDefaults.standard.string(forKey: UserDefaultsKeys.accountToken.rawValue)
+    private(set) var token: String? {
+        set {
+            UserDefaults.standard.set(newValue, forKey: UserDefaultsKeys.accountToken.rawValue)
+        }
+        get {
+            return UserDefaults.standard.string(forKey: UserDefaultsKeys.accountToken.rawValue)
+        }
     }
 
     var formattedToken: String? {
@@ -56,9 +64,19 @@ class Account {
     }
 
     /// Returns the account expiry for the currently used account token
-    var expiry: Date? {
-        return UserDefaults.standard.object(forKey: UserDefaultsKeys.accountExpiry.rawValue) as? Date
+    private(set) var expiry: Date? {
+        set {
+            UserDefaults.standard.set(newValue, forKey: UserDefaultsKeys.accountExpiry.rawValue)
+        }
+        get {
+            return UserDefaults.standard.object(forKey: UserDefaultsKeys.accountExpiry.rawValue) as? Date
+        }
     }
+
+    private let rpc = MullvadRpc.withEphemeralURLSession()
+    private var updateExpiryTask: URLSessionTask?
+    private let operationQueue = OperationQueue()
+    private lazy var exclusivityController = ExclusivityController<String>(operationQueue: operationQueue)
 
     var isLoggedIn: Bool {
         return token != nil
@@ -70,9 +88,11 @@ class Account {
     }
 
     func loginWithNewAccount(completionHandler: @escaping (Result<(String, Date), Error>) -> Void) {
-        let urlSessionTask = rpc.createAccount().dataTask { (rpcResult) in
+        let operation = rpc.createAccount().operation()
+
+        operation.addDidFinishBlockObserver({ (operation, result) in
             DispatchQueue.main.async {
-                switch rpcResult {
+                switch result {
                 case .success(let newAccountToken):
                     let expiry = Date()
                     self.setupTunnel(accountToken: newAccountToken, expiry: expiry) { (result) in
@@ -83,39 +103,94 @@ class Account {
                     completionHandler(.failure(.createAccount(error)))
                 }
             }
-        }
+        })
 
-        urlSessionTask?.resume()
+        exclusivityController.addOperation(operation, categories: [kExclusiveOperationCategory])
     }
 
     /// Perform the login and save the account token along with expiry (if available) to the
     /// application preferences.
     func login(with accountToken: String, completionHandler: @escaping (Result<Date, Error>) -> Void) {
-        let urlSessionTask = rpc.getAccountExpiry(accountToken: accountToken)
-            .dataTask { (rpcResult) in
-                DispatchQueue.main.async {
-                    switch rpcResult {
-                    case .success(let expiry):
-                        self.setupTunnel(accountToken: accountToken, expiry: expiry) { (result) in
-                            completionHandler(result.map { expiry })
-                        }
+        let operation = rpc.getAccountExpiry(accountToken: accountToken)
+            .operation()
 
-                    case .failure(let error):
-                        completionHandler(.failure(.verifyAccount(error)))
+        operation.addDidFinishBlockObserver { (operation, result) in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let expiry):
+                    self.setupTunnel(accountToken: accountToken, expiry: expiry) { (result) in
+                        completionHandler(result.map { expiry })
                     }
+
+                case .failure(let error):
+                    completionHandler(.failure(.verifyAccount(error)))
                 }
+            }
         }
 
-        urlSessionTask?.resume()
+        exclusivityController.addOperation(operation, categories: [kExclusiveOperationCategory])
     }
 
     /// Perform the logout by erasing the account token and expiry from the application preferences.
     func logout(completionHandler: @escaping (Result<(), Error>) -> Void) {
-        TunnelManager.shared.unsetAccount { (result) in
+        let operation = ResultOperation<(), Error> { (finish) in
+            TunnelManager.shared.unsetAccount { (result) in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        self.removeFromPreferences()
+
+                        finish(.success(()))
+
+                    case .failure(let error):
+                        finish(.failure(.tunnelConfiguration(error)))
+                    }
+                }
+            }
+        }
+
+        operation.addDidFinishBlockObserver { (operation, result) in
+            DispatchQueue.main.async {
+                completionHandler(result)
+            }
+        }
+
+        exclusivityController.addOperation(operation, categories: [kExclusiveOperationCategory])
+    }
+
+    func updateAccountExpiry() {
+        let makeRequest = ResultOperation { () -> MullvadRpc.Request<Date>? in
+            return self.token.flatMap { (accountToken) -> MullvadRpc.Request<Date>? in
+                self.rpc.getAccountExpiry(accountToken: accountToken)
+            }
+        }
+
+        let sendRequest = rpc.getAccountExpiry()
+            .injectResult(from: makeRequest)
+
+        sendRequest.addDidFinishBlockObserver { (operation, result) in
             DispatchQueue.main.async {
                 switch result {
+                case .success(let expiry):
+                    self.expiry = expiry
+                    self.postExpiryUpdateNotification(newExpiry: expiry)
+
+                case .failure(let error):
+                    error.logChain(message: "Failed to update account expiry")
+                }
+            }
+        }
+
+        exclusivityController.addOperations([makeRequest, sendRequest], categories: [kExclusiveOperationCategory])
+    }
+
+    private func setupTunnel(accountToken: String, expiry: Date, completionHandler: @escaping (Result<(), Error>) -> Void) {
+        TunnelManager.shared.setAccount(accountToken: accountToken) { (managerResult) in
+            DispatchQueue.main.async {
+                switch managerResult {
                 case .success:
-                    self.removeAccountFromPreferences()
+                    self.token = accountToken
+                    self.expiry = expiry
 
                     completionHandler(.success(()))
 
@@ -126,37 +201,19 @@ class Account {
         }
     }
 
-    private func setupTunnel(accountToken: String, expiry: Date, completionHandler: @escaping (Result<(), Error>) -> Void) {
-          TunnelManager.shared.setAccount(accountToken: accountToken) { (managerResult) in
-              DispatchQueue.main.async {
-                  switch managerResult {
-                  case .success:
-                      self.saveAccountToPreferences(
-                          accountToken: accountToken,
-                          expiry: expiry
-                      )
-                      completionHandler(.success(()))
-
-                  case .failure(let error):
-                      completionHandler(.failure(.tunnelConfiguration(error)))
-                  }
-              }
-          }
-      }
-
-    private func saveAccountToPreferences(accountToken: String, expiry: Date) {
-        let preferences = UserDefaults.standard
-
-        preferences.set(accountToken, forKey: UserDefaultsKeys.accountToken.rawValue)
-        preferences.set(expiry, forKey: UserDefaultsKeys.accountExpiry.rawValue)
-    }
-
-    private func removeAccountFromPreferences() {
+    private func removeFromPreferences() {
         let preferences = UserDefaults.standard
 
         preferences.removeObject(forKey: UserDefaultsKeys.accountToken.rawValue)
         preferences.removeObject(forKey: UserDefaultsKeys.accountExpiry.rawValue)
 
+    }
+
+    fileprivate func postExpiryUpdateNotification(newExpiry: Date) {
+        NotificationCenter.default.post(
+            name: Self.didUpdateAccountExpiryNotification,
+            object: self, userInfo: [Self.newAccountExpiryUserInfoKey: newExpiry]
+        )
     }
 }
 
@@ -166,17 +223,25 @@ extension Account: AppStorePaymentObserver {
         paymentManager.addPaymentObserver(self)
     }
 
-    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, didFailWithError error: AppStorePaymentManager.Error) {
+    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, accountToken: String?, didFailWithError error: AppStorePaymentManager.Error) {
         // no-op
     }
 
-    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, didFinishWithResponse response: SendAppStoreReceiptResponse) {
-        UserDefaults.standard.set(response.newExpiry,
-                                  forKey: UserDefaultsKeys.accountExpiry.rawValue)
+    func appStorePaymentManager(_ manager: AppStorePaymentManager, transaction: SKPaymentTransaction, accountToken: String, didFinishWithResponse response: SendAppStoreReceiptResponse) {
+        let newExpiry = response.newExpiry
 
-        NotificationCenter.default.post(
-            name: Self.didUpdateAccountExpiryNotification,
-            object: self, userInfo: [Self.newAccountExpiryUserInfoKey: response.newExpiry]
-        )
+        let operation = AsyncBlockOperation { (finish) in
+            DispatchQueue.main.async {
+                // Make sure that payment corresponds to the active account token
+                if self.token == accountToken {
+                    self.expiry = newExpiry
+                    self.postExpiryUpdateNotification(newExpiry: newExpiry)
+                }
+
+                finish()
+            }
+        }
+
+        exclusivityController.addOperation(operation, categories: [kExclusiveOperationCategory])
     }
 }

@@ -129,6 +129,7 @@
 		58D0C79E23F1CEBA00FE9BA7 /* SnapshotHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D0C79D23F1CEBA00FE9BA7 /* SnapshotHelper.swift */; };
 		58D0C7A223F1CECF00FE9BA7 /* MullvadVPNScreenshots.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D0C7A023F1CECF00FE9BA7 /* MullvadVPNScreenshots.swift */; };
 		58DF28A52417CB4B00E836B0 /* AppStorePaymentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58DF28A42417CB4B00E836B0 /* AppStorePaymentManager.swift */; };
+		58E6771F24ADFE7800AA26E7 /* SettingsNavigationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E6771E24ADFE7800AA26E7 /* SettingsNavigationController.swift */; };
 		58EC4E6C23915325003F5C5B /* Bundle+MullvadVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58EC4E6B23915325003F5C5B /* Bundle+MullvadVersion.swift */; };
 		58F19E35228C15BA00C7710B /* SpinnerActivityIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F19E34228C15BA00C7710B /* SpinnerActivityIndicatorView.swift */; };
 		58F3C0962492617E003E76BE /* AsyncOperation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58E973DD24850EB600096F90 /* AsyncOperation.swift */; };
@@ -295,6 +296,7 @@
 		58D0C79F23F1CECF00FE9BA7 /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		58D0C7A023F1CECF00FE9BA7 /* MullvadVPNScreenshots.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MullvadVPNScreenshots.swift; sourceTree = "<group>"; };
 		58DF28A42417CB4B00E836B0 /* AppStorePaymentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStorePaymentManager.swift; sourceTree = "<group>"; };
+		58E6771E24ADFE7800AA26E7 /* SettingsNavigationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNavigationController.swift; sourceTree = "<group>"; };
 		58E973DD24850EB600096F90 /* AsyncOperation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncOperation.swift; sourceTree = "<group>"; };
 		58EC4E6B23915325003F5C5B /* Bundle+MullvadVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Bundle+MullvadVersion.swift"; sourceTree = "<group>"; };
 		58ECD29123F178FD004298B6 /* Screenshots.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Screenshots.xcconfig; sourceTree = "<group>"; };
@@ -495,6 +497,7 @@
 				58F3C098249B978C003E76BE /* x25519.c */,
 				58F3C097249B978C003E76BE /* x25519.h */,
 				58CC40EE24A601900019D96E /* ObserverList.swift */,
+				58E6771E24ADFE7800AA26E7 /* SettingsNavigationController.swift */,
 			);
 			path = MullvadVPN;
 			sourceTree = "<group>";
@@ -822,6 +825,7 @@
 				5840250122B1124600E4CFEC /* IpAddress+Codable.swift in Sources */,
 				58EC4E6C23915325003F5C5B /* Bundle+MullvadVersion.swift in Sources */,
 				58BA693123EADA6A009DC256 /* SimulatorTunnelProvider.swift in Sources */,
+				58E6771F24ADFE7800AA26E7 /* SettingsNavigationController.swift in Sources */,
 				58A1AA8C23F5584C009F7EA6 /* ConnectionPanelView.swift in Sources */,
 				582BB1B52295780F0055B6EF /* AccountExpiry.swift in Sources */,
 				582BB1B3229574F40055B6EF /* SettingsAccountCell.swift in Sources */,

@@ -20,6 +20,7 @@ class SettingsCell: BasicTableViewCell {
         selectedBackgroundView?.backgroundColor = UIColor.Cell.selectedAltBackgroundColor
 
         contentView.layoutMargins = preferredMargins
+        separatorInset = .zero
 
         enableDisclosureViewTintColorFix()
     }

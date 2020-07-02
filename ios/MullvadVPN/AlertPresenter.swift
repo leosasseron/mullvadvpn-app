@@ -9,16 +9,23 @@
 import Foundation
 import UIKit
 
+private let kUIAlertControllerDidDissmissNotification = Notification.Name("UIAlertControllerDidDismiss")
+
 class AlertPresenter {
     private var operationQueue = OperationQueue()
     private var lastOperation: Operation?
 
-    func enqueue(_ alertController: UIAlertController, presentingController: UIViewController) {
+    init() {
+        _ = AlertPresenterUIKitHooks.once
+    }
+
+    func enqueue(_ alertController: UIAlertController, presentingController: UIViewController, presentCompletion: (() -> Void)? = nil) {
         assert(Thread.isMainThread)
 
         let operation = PresentAlertOperation(
             alertController: alertController,
-            presentingController: presentingController
+            presentingController: presentingController,
+            presentCompletion: presentCompletion
         )
 
         if let lastOperation = lastOperation {
@@ -29,16 +36,19 @@ class AlertPresenter {
 
         operationQueue.addOperation(operation)
     }
+
 }
 
 private class PresentAlertOperation: AsyncOperation {
     private let alertController: UIAlertController
     private let presentingController: UIViewController
     private var dismissalObserver: NSObjectProtocol?
+    private let presentCompletion: (() -> Void)?
 
-    init(alertController: UIAlertController, presentingController: UIViewController) {
+    init(alertController: UIAlertController, presentingController: UIViewController, presentCompletion: (() -> Void)? = nil) {
         self.alertController = alertController
         self.presentingController = presentingController
+        self.presentCompletion = presentCompletion
 
         super.init()
     }
@@ -46,19 +56,43 @@ private class PresentAlertOperation: AsyncOperation {
     override func main() {
         DispatchQueue.main.async {
             self.dismissalObserver = NotificationCenter.default.addObserver(
-                forName: .UIPresentationControllerDismissalTransitionDidEndNotification,
+                forName: kUIAlertControllerDidDissmissNotification,
                 object: self.alertController,
                 queue: nil,
                 using: { [weak self] (note) in
                     self?.finish()
             })
 
-            self.presentingController.present(self.alertController, animated: true)
+            self.presentingController.present(self.alertController, animated: true, completion: self.presentCompletion)
         }
     }
 }
 
-extension Notification.Name {
-    /// A private UIKit notification that `UIPresentationController` sends upon dismissal.
-    static var UIPresentationControllerDismissalTransitionDidEndNotification = Notification.Name("UIPresentationControllerDismissalTransitionDidEndNotification")
+private struct AlertPresenterUIKitHooks {
+    typealias MethodType = @convention(c) (UIAlertController, Selector, Bool) -> Void
+    typealias BlockImpType = @convention(block) (UIAlertController, Bool) -> Void
+
+    static let once = AlertPresenterUIKitHooks()
+
+    private init() {
+        let originalSelector = #selector(UIAlertController.viewDidDisappear(_:))
+        let originalMethod = class_getInstanceMethod(UIAlertController.self, originalSelector)!
+
+        var originalIMP: IMP? = nil
+        let swizzledBlockIMP: BlockImpType = { (receiver, animated) in
+            let superIMP = originalIMP.map { unsafeBitCast($0, to: MethodType.self) }
+            superIMP?(receiver, originalSelector, animated)
+            
+            Self.handleViewDidDisappear(receiver, animated)
+        }
+
+        let swizzledIMP = imp_implementationWithBlock(unsafeBitCast(swizzledBlockIMP, to: AnyObject.self))
+        originalIMP = method_setImplementation(originalMethod, swizzledIMP)
+    }
+
+    private static func handleViewDidDisappear(_ alertController: UIAlertController, _ animated: Bool) {
+        if alertController.presentingViewController == nil {
+            NotificationCenter.default.post(name: kUIAlertControllerDidDissmissNotification, object: alertController)
+        }
+    }
 }

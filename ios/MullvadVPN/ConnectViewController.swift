@@ -148,8 +148,7 @@ class ConnectViewController: UIViewController,
                     break
 
                 case .failure(let error):
-                    os_log(.error, "%{public}s",
-                           error.displayChain(message: "Failed to start the VPN tunnel"))
+                    error.logChain(message: "Failed to start the VPN tunnel")
 
                     let alertController = UIAlertController(
                         title: NSLocalizedString("Failed to start the VPN tunnel", comment: ""),
@@ -169,7 +168,7 @@ class ConnectViewController: UIViewController,
     private func disconnectTunnel() {
         TunnelManager.shared.stopTunnel { (result) in
             if case .failure(let error) = result {
-                os_log(.error, "%{public}s", error.displayChain(message: "Failed to stop the VPN tunnel"))
+                error.logChain(message: "Failed to stop the VPN tunnel")
 
                 let alertController = UIAlertController(
                     title: NSLocalizedString("Failed to stop the VPN tunnel", comment: ""),

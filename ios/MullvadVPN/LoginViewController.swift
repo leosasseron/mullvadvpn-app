@@ -54,6 +54,7 @@ class LoginViewController: UIViewController, RootContainment {
         return false
     }
 
+    private let alertPresenter = AlertPresenter()
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -159,8 +160,7 @@ class LoginViewController: UIViewController, RootContainment {
                 self.endLogin(.success(.existingAccount))
 
             case .failure(let error):
-                os_log(.error, "%{public}s",
-                       error.displayChain(message: "Failed to log in with existing account"))
+                error.logChain(message: "Failed to log in with existing account")
 
                 self.endLogin(.failure(error))
             }
@@ -180,8 +180,7 @@ class LoginViewController: UIViewController, RootContainment {
 
                 self.endLogin(.success(.newAccount))
             case .failure(let error):
-                os_log(.error, "%{public}s",
-                       error.displayChain(message: "Failed to log in with new account"))
+                error.logChain(message: "Failed to log in with new account")
 
                 self.endLogin(.failure(error))
             }

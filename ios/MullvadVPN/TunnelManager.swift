@@ -298,7 +298,7 @@ class TunnelManager {
     /// The given account token is used to ensure that the system tunnel was configured for the same
     /// account. The system tunnel is removed in case of inconsistency.
     func loadTunnel(accountToken: String?, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
+        let operation = ResultOperation<(), TunnelManager.Error> { (finish) in
             TunnelProviderManagerType.loadAllFromPreferences { (tunnels, error) in
                 self.dispatchQueue.async {
                     if let error = error {
@@ -347,13 +347,11 @@ class TunnelManager {
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     /// Refresh tunnel state.
@@ -373,11 +371,11 @@ class TunnelManager {
             completionHandler?()
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func startTunnel(completionHandler: @escaping (Result<(), Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+        let operation = ResultOperation<(), Error> { (finish) in
             guard let accountToken = self.accountToken else {
                 finish(.failure(.missingAccount))
                 return
@@ -393,17 +391,15 @@ class TunnelManager {
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func stopTunnel(completionHandler: @escaping (Result<(), Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+        let operation = ResultOperation<(), Error> { (finish) in
             guard let tunnelProvider = self.tunnelProvider else {
                 completionHandler(.success(()))
                 return
@@ -422,17 +418,15 @@ class TunnelManager {
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func setAccount(accountToken: String, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
+        let operation = ResultOperation<(), TunnelManager.Error> { (finish) in
             let result = Self.makeTunnelSettings(accountToken: accountToken)
 
             guard case .success(let tunnelSettings) = result else {
@@ -463,19 +457,16 @@ class TunnelManager {
                 finish(result)
             }
         }
-
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     /// Remove the account token and remove the active tunnel
     func unsetAccount(completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
+        let operation = ResultOperation<(), TunnelManager.Error> { (finish) in
             guard let accountToken = self.accountToken else {
                 finish(.failure(.missingAccount))
                 return
@@ -501,19 +492,19 @@ class TunnelManager {
                         .rawRepresentation
 
                     // Remove WireGuard key from server
-                    let rpcRequest = self.rpc.removeWireguardKey(
+                    let request = self.rpc.removeWireguardKey(
                         accountToken: keychainEntry.accountToken,
                         publicKey: publicKey
                     )
 
-                    let urlSessionTask = rpcRequest.dataTask(completionHandler: { (result) in
+                    request.start(completionHandler: { (result) in
                         self.dispatchQueue.async {
                             switch result {
                             case .success(let isRemoved):
                                 os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
 
                             case .failure(let error):
-                                os_log(.error, "%{public}s", error.displayChain(message: "Failed to unset account"))
+                                error.logChain(message: "Failed to unset account")
                             }
 
                             cleanupState()
@@ -521,13 +512,11 @@ class TunnelManager {
                         }
                     })
 
-                    urlSessionTask?.resume()
-
                 case .failure(let error):
                     // Ignore Keychain errors because that normally means that the Keychain
                     // configuration was already removed and we shouldn't be blocking the
                     // user from logging out
-                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to unset account"))
+                    error.logChain(message: "Failed to unset account")
 
                     cleanupState()
                     finish(.success(()))
@@ -556,17 +545,15 @@ class TunnelManager {
             })
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func verifyPublicKey(completionHandler: @escaping (Result<Bool, Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<Bool, Error>> { (finish) in
+        let operation = ResultOperation<Bool, Error> { (finish) in
             guard let accountToken = self.accountToken else {
                 finish(.failure(.missingAccount))
                 return
@@ -578,33 +565,29 @@ class TunnelManager {
                     .privateKey
                     .publicKey.rawRepresentation
 
-                let rpcRequest = self.rpc.checkWireguardKey(
+                let request = self.rpc.checkWireguardKey(
                     accountToken: keychainEntry.accountToken,
                     publicKey: publicKey
                 )
 
-                let urlSessionTask = rpcRequest.dataTask { (result) in
+                request.start { (result) in
                     finish(result.mapError { Error.verifyWireguardKey($0) })
                 }
-
-                urlSessionTask?.resume()
 
             case .failure(let error):
                 finish(.failure(error))
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
         operationQueue.addOperation(operation)
     }
 
     func regeneratePrivateKey(completionHandler: @escaping (Result<(), Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), Error>> { (finish) in
+        let operation = ResultOperation<(), Error> { (finish) in
             guard let accountToken = self.accountToken else {
                 finish(.failure(.missingAccount))
                 return
@@ -638,7 +621,7 @@ class TunnelManager {
                 tunnelIpc.reloadTunnelSettings { (ipcResult) in
                     if case .failure(let error) = ipcResult {
                         // Ignore Packet Tunnel IPC errors but log them
-                        os_log(.error, "%{public}s", error.displayChain(message: "Failed to IPC the tunnel to reload configuration"))
+                        error.logChain(message: "Failed to IPC the tunnel to reload configuration")
                     }
 
                     finish(.success(()))
@@ -646,17 +629,15 @@ class TunnelManager {
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func setRelayConstraints(_ constraints: RelayConstraints, completionHandler: @escaping (Result<(), TunnelManager.Error>) -> Void) {
-        let operation = AsyncBlockOutputOperation<Result<(), TunnelManager.Error>> { (finish) in
+        let operation = ResultOperation<(), TunnelManager.Error> { (finish) in
             guard let accountToken = self.accountToken else {
                 finish(.failure(.missingAccount))
                 return
@@ -679,20 +660,18 @@ class TunnelManager {
             tunnelIpc.reloadTunnelSettings { (ipcResult) in
                 // Ignore Packet Tunnel IPC errors but log them
                 if case .failure(let error) = ipcResult {
-                    os_log(.error, "%{public}s", error.displayChain(message: "Failed to reload tunnel settings"))
+                    error.logChain(message: "Failed to reload tunnel settings")
                 }
 
                 finish(.success(()))
             }
         }
 
-        operation.completionBlock = {
-            if let output = operation.output {
-                completionHandler(output)
-            }
+        operation.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     func getRelayConstraints(completionHandler: @escaping (Result<RelayConstraints, TunnelManager.Error>) -> Void) {
@@ -710,7 +689,7 @@ class TunnelManager {
             completionHandler(result)
         }
 
-        addTunnelControlOperation(operation)
+        exclusityController.addOperation(operation, categories: [.tunnelControl])
     }
 
     // MARK: - Tunnel observeration
@@ -731,33 +710,19 @@ class TunnelManager {
 
     // MARK: - Operation management
 
+    enum OperationCategory {
+        case tunnelControl
+        case stateUpdate
+    }
+
     private lazy var operationQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.underlyingQueue = self.dispatchQueue
         return queue
     }()
-    private var tunnelControlOperation: Operation?
-    private var tunnelStateUpdateOperation: Operation?
-
-    private func addTunnelControlOperation(_ operation: Operation) {
-        dispatchQueue.async {
-            if let dependency = self.tunnelControlOperation {
-                operation.addDependency(dependency)
-            }
-            self.tunnelControlOperation = operation
-            self.operationQueue.addOperation(operation)
-        }
-    }
-
-    private func addTunnelStateUpdateOperation(_ operation: Operation) {
-        dispatchQueue.async {
-            if let dependency = self.tunnelStateUpdateOperation {
-                operation.addDependency(dependency)
-            }
-            self.tunnelStateUpdateOperation = operation
-            self.operationQueue.addOperation(operation)
-        }
-    }
+    private lazy var exclusityController: ExclusivityController<OperationCategory> = {
+        return ExclusivityController(operationQueue: self.operationQueue)
+    }()
 
     // MARK: - Private methods
 
@@ -807,7 +772,7 @@ class TunnelManager {
             self.publicKey = entry.tunnelSettings.interface.privateKey.publicKey
 
         case .failure(let error):
-            os_log(.error, "%{public}s", error.displayChain(message: "Failed to load the public key"))
+            error.logChain(message: "Failed to load the public key")
 
             self.publicKey = nil
         }
@@ -818,12 +783,12 @@ class TunnelManager {
         publicKey: WireguardPublicKey,
         completionHandler: @escaping (Result<(), Error>) -> Void)
     {
-        let rpcRequest = self.rpc.pushWireguardKey(
+        let request = self.rpc.pushWireguardKey(
             accountToken: accountToken,
             publicKey: publicKey.rawRepresentation
         )
 
-        let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
+        request.start { (rpcResult) in
             self.dispatchQueue.async {
                 let updateResult = rpcResult
                     .mapError({ (rpcError) -> Error in
@@ -841,8 +806,6 @@ class TunnelManager {
                 completionHandler(updateResult)
             }
         }
-
-        urlSessionTask?.resume()
     }
 
     private func replaceWireguardKeyAndUpdateSettings(
@@ -851,13 +814,13 @@ class TunnelManager {
         newPrivateKey: WireguardPrivateKey,
         completionHandler: @escaping (Result<(), Error>) -> Void)
     {
-        let rpcRequest = self.rpc.replaceWireguardKey(
+        let request = self.rpc.replaceWireguardKey(
             accountToken: accountToken,
             oldPublicKey: oldPublicKey.rawRepresentation,
             newPublicKey: newPrivateKey.publicKey.rawRepresentation
         )
 
-        let urlSessionTask = rpcRequest.dataTask { (rpcResult) in
+        request.start { (rpcResult) in
             self.dispatchQueue.async {
                 let updateResult = rpcResult
                     .mapError({ (rpcError) -> Error in
@@ -876,8 +839,6 @@ class TunnelManager {
                 completionHandler(updateResult)
             }
         }
-
-        urlSessionTask?.resume()
     }
 
     /// Initiates the `tunnelState` update
@@ -890,15 +851,14 @@ class TunnelManager {
                     self.tunnelState = tunnelState
 
                 case .failure(let error):
-                    os_log(.error, "%{public}s",
-                           error.displayChain(message: "Failed to map the tunnel state"))
+                    error.logChain(message: "Failed to map the tunnel state")
                 }
 
                 finish()
             }
         }
 
-        addTunnelStateUpdateOperation(operation)
+        exclusityController.addOperation(operation, categories: [.stateUpdate])
     }
 
     /// Maps `NEVPNStatus` to `TunnelState`.
@@ -1072,7 +1032,7 @@ class TunnelManager {
             }
 
         case .failure(let error):
-            os_log("%{public}s", error.displayChain(message: "Failed to migrate tunnel settings"))
+            error.logChain(message: "Failed to migrate tunnel settings")
         }
     }
 

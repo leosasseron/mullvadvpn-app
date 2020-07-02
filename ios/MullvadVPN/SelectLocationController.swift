@@ -41,7 +41,7 @@ class SelectLocationController: UITableViewController, RelayCacheObserver {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-
+        
         dataSource = DataSource(
             tableView: self.tableView,
             cellProvider: { [weak self] (tableView, indexPath, item) -> UITableViewCell? in
@@ -111,7 +111,7 @@ class SelectLocationController: UITableViewController, RelayCacheObserver {
                     self.didReceive(relayList: cachedRelayList.relayList, relayConstraints: relayConstraints)
 
                 case .failure(let error):
-                    os_log(.error, "%{public}s", error.displayChain())
+                    error.logChain()
                 }
             }
         }
@@ -129,7 +129,7 @@ class SelectLocationController: UITableViewController, RelayCacheObserver {
                     self.didReceive(relayList: cachedRelayList.relayList, relayConstraints: relayConstraints)
 
                 case .failure(let error):
-                    os_log(.error, "%{public}s", error.displayChain())
+                    error.logChain()
                 }
 
                 self.activityIndicator.stopAnimating()
