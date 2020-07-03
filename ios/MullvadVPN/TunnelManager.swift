@@ -384,6 +384,7 @@ class TunnelManager {
             self.makeTunnelProvider(accountToken: accountToken) { (result) in
                 let result = result.flatMap { (tunnelProvider) -> Result<(), Error> in
                     self.setTunnelProvider(tunnelProvider: tunnelProvider)
+
                     return Result { try tunnelProvider.connection.startVPNTunnel() }
                         .mapError { Error.startVPNTunnel($0) }
                 }
@@ -744,7 +745,7 @@ class TunnelManager {
         // Register for tunnel connection status changes
         unregisterConnectionObserver()
         connectionStatusObserver = NotificationCenter.default
-            .addObserver(forName: .NEVPNStatusDidChange, object: connection, queue: operationQueue) {
+            .addObserver(forName: .NEVPNStatusDidChange, object: connection, queue: nil) {
                 [weak self] (notification) in
                 guard let self = self else { return }
 
