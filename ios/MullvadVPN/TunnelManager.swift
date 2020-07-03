@@ -184,6 +184,9 @@ class TunnelManager {
         /// A failure to replace the public WireGuard key
         case replaceWireguardKey(MullvadRpc.Error)
 
+        /// A failure to remove the public WireGuard key
+        case removeWireguardKey(MullvadRpc.Error)
+
         /// A failure to verify the public WireGuard key
         case verifyWireguardKey(MullvadRpc.Error)
 
@@ -217,6 +220,8 @@ class TunnelManager {
                 return "Failed to push the WireGuard key to server"
             case .replaceWireguardKey:
                 return "Failed to replace the WireGuard key on server"
+            case .removeWireguardKey:
+                return "Failed to remove the WireGuard key from server"
             case .verifyWireguardKey:
                 return "Failed to verify the WireGuard key on server"
             }
@@ -406,7 +411,7 @@ class TunnelManager {
     func stopTunnel(completionHandler: @escaping (Result<(), Error>) -> Void) {
         let operation = ResultOperation<(), Error> { (finish) in
             guard let tunnelProvider = self.tunnelProvider else {
-                completionHandler(.success(()))
+                finish(.success(()))
                 return
             }
 
@@ -415,7 +420,7 @@ class TunnelManager {
 
             tunnelProvider.saveToPreferences { (error) in
                 if let error = error {
-                    finish(.failure(.saveVPNConfiguration(error)))
+                    completionHandler(.failure(.saveVPNConfiguration(error)))
                 } else {
                     tunnelProvider.connection.stopVPNTunnel()
                     finish(.success(()))
@@ -477,77 +482,83 @@ class TunnelManager {
                 return
             }
 
-            let cleanupState = {
+            let completeOperation = {
                 self.accountToken = nil
                 self.publicKey = nil
-                self.tunnelProvider = nil
-                self.tunnelIpc = nil
 
-                self.unregisterConnectionObserver()
-                self.tunnelState = .disconnected
+                finish(.success(()))
             }
 
-            let removeFromKeychainAndServer = {
-                switch Self.loadTunnelSettings(accountToken: accountToken) {
-                case .success(let keychainEntry):
-                    let publicKey = keychainEntry.tunnelSettings
-                        .interface
-                        .privateKey
-                        .publicKey
-                        .rawRepresentation
+            let removeTunnel = {
+                // Unregister from receiving the tunnel state changes
+                self.unregisterConnectionObserver()
+                self.tunnelState = .disconnected
+                self.tunnelIpc = nil
 
-                    // Remove WireGuard key from server
-                    let request = self.rpc.removeWireguardKey(
-                        accountToken: keychainEntry.accountToken,
-                        publicKey: publicKey
-                    )
-
-                    request.start(completionHandler: { (result) in
-                        self.dispatchQueue.async {
-                            switch result {
-                            case .success(let isRemoved):
-                                os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
-
-                            case .failure(let error):
-                                error.logChain(message: "Failed to remove the WireGuard key from server")
-                            }
-
-                            cleanupState()
-                            finish(.success(()))
-                        }
-                    })
-
+                // Remove settings from Keychain
+                switch TunnelSettingsManager.remove(searchTerm: .accountToken(accountToken)) {
+                case .success:
+                    break
                 case .failure(let error):
                     // Ignore Keychain errors because that normally means that the Keychain
                     // configuration was already removed and we shouldn't be blocking the
                     // user from logging out
-                    error.logChain(message: "Failed to unset account")
-
-                    cleanupState()
-                    finish(.success(()))
+                    error.logChain(message: "Unset account error")
                 }
-            }
 
-            guard let tunnelProvider = self.tunnelProvider else {
-                removeFromKeychainAndServer()
-                return
-            }
+                guard let tunnelProvider = self.tunnelProvider else {
+                    completeOperation()
+                    return
+                }
 
-            // Remove VPN configuration
-            tunnelProvider.removeFromPreferences(completionHandler: { (error) in
-                self.dispatchQueue.async {
-                    if let error = error {
-                        // Ignore error if the tunnel was already removed by user
-                        if let systemError = error as? NEVPNError, systemError.code == .configurationInvalid {
-                            removeFromKeychainAndServer()
+                self.tunnelProvider = nil
+
+                // Remove VPN configuration
+                tunnelProvider.removeFromPreferences(completionHandler: { (error) in
+                    self.dispatchQueue.async {
+                        if let error = error {
+                            // Ignore error if the tunnel was already removed by user
+                            if let systemError = error as? NEVPNError, systemError.code == .configurationInvalid {
+                                completeOperation()
+                            } else {
+                                finish(.failure(.removeVPNConfiguration(error)))
+                            }
                         } else {
-                            finish(.failure(.removeVPNConfiguration(error)))
+                            completeOperation()
                         }
-                    } else {
-                        removeFromKeychainAndServer()
                     }
+                })
+            }
+
+            switch Self.loadTunnelSettings(accountToken: accountToken) {
+            case .success(let keychainEntry):
+                let publicKey = keychainEntry.tunnelSettings
+                    .interface
+                    .privateKey
+                    .publicKey
+                    .rawRepresentation
+
+                self.removeWireguardKeyFromServer(accountToken: accountToken, publicKey: publicKey) { (result) in
+                    switch result {
+                    case .success(let isRemoved):
+                        os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
+
+                    case .failure(let error):
+                        error.logChain(message: "Unset account error")
+                    }
+
+                    removeTunnel()
                 }
-            })
+
+            case .failure(let error):
+                // Ignore Keychain errors because that normally means that the Keychain
+                // configuration was already removed and we shouldn't be blocking the
+                // user from logging out
+                error.logChain(message: "Unset account error")
+
+                removeTunnel()
+            }
+
         }
 
         operation.addDidFinishBlockObserver { (operation, result) in
@@ -805,6 +816,19 @@ class TunnelManager {
                 completionHandler(updateResult)
             }
         }
+    }
+
+    private func removeWireguardKeyFromServer(accountToken: String, publicKey: Data, completionHandler: @escaping (Result<Bool, Error>) -> Void) {
+        let request = self.rpc.removeWireguardKey(
+            accountToken: accountToken,
+            publicKey: publicKey
+        )
+
+        request.start(completionHandler: { (result) in
+            self.dispatchQueue.async {
+                completionHandler(result.mapError { Error.removeWireguardKey($0) })
+            }
+        })
     }
 
     private func replaceWireguardKeyAndUpdateSettings(

@@ -97,6 +97,10 @@ extension TunnelManager.Error: DisplayChainedError {
 
             return message
 
+        case .removeWireguardKey:
+            // This error is never displayed anywhere
+            return nil
+
         case .verifyWireguardKey(let rpcError):
             let reason = rpcError.errorChainDescription ?? ""
 
