@@ -283,6 +283,8 @@ class TunnelManager {
     private(set) var publicKey: WireguardPublicKey? {
         set {
             stateLock.withCriticalBlock {
+                guard _publicKey != newValue else { return }
+
                 _publicKey = newValue
 
                 observerList.forEach { (observer) in
