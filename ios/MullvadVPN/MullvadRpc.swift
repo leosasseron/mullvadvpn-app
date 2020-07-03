@@ -177,6 +177,10 @@ class MullvadRpc {
         return MullvadRpc.Request(session: session, request: request)
     }
 
+    func checkWireguardKey(request: MullvadRpc.Request<Bool>? = nil) -> MullvadRpc.Operation<Bool> {
+        return MullvadRpc.Operation(request: request)
+    }
+
     func removeWireguardKey(accountToken: String, publicKey: Data) -> MullvadRpc.Request<Bool> {
         let request = JsonRpcRequest(method: "remove_wg_key", params: [
             AnyEncodable(accountToken),

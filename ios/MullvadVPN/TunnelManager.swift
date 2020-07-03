@@ -509,7 +509,7 @@ class TunnelManager {
                                 os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
 
                             case .failure(let error):
-                                error.logChain(message: "Failed to unset account")
+                                error.logChain(message: "Failed to remove the WireGuard key from server")
                             }
 
                             cleanupState()
@@ -558,37 +558,33 @@ class TunnelManager {
     }
 
     func verifyPublicKey(completionHandler: @escaping (Result<Bool, Error>) -> Void) {
-        let operation = ResultOperation<Bool, Error> { (finish) in
+        let makeRequest = ResultOperation<MullvadRpc.Request<Bool>, Error> {
+            () -> Result<MullvadRpc.Request<Bool>, Error> in
             guard let accountToken = self.accountToken else {
-                finish(.failure(.missingAccount))
-                return
+                return .failure(.missingAccount)
             }
 
-            switch Self.loadTunnelSettings(accountToken: accountToken) {
-            case .success(let keychainEntry):
-                let publicKey = keychainEntry.tunnelSettings.interface
-                    .privateKey
-                    .publicKey.rawRepresentation
+            return Self.loadTunnelSettings(accountToken: accountToken)
+                .map { (keychainEntry) -> MullvadRpc.Request<Bool> in
+                    let publicKey = keychainEntry.tunnelSettings.interface
+                        .privateKey
+                        .publicKey.rawRepresentation
 
-                let request = self.rpc.checkWireguardKey(
-                    accountToken: keychainEntry.accountToken,
-                    publicKey: publicKey
-                )
-
-                request.start { (result) in
-                    finish(result.mapError { Error.verifyWireguardKey($0) })
-                }
-
-            case .failure(let error):
-                finish(.failure(error))
+                    return self.rpc.checkWireguardKey(
+                        accountToken: keychainEntry.accountToken,
+                        publicKey: publicKey
+                    )
             }
         }
 
-        operation.addDidFinishBlockObserver { (operation, result) in
-            completionHandler(result)
+        let sendRequest = rpc.checkWireguardKey()
+            .injectResult(from: makeRequest)
+
+        sendRequest.addDidFinishBlockObserver { (operation, result) in
+            completionHandler(result.mapError { Error.verifyWireguardKey($0) })
         }
 
-        operationQueue.addOperation(operation)
+        operationQueue.addOperations([makeRequest, sendRequest], waitUntilFinished: false)
     }
 
     func regeneratePrivateKey(completionHandler: @escaping (Result<(), Error>) -> Void) {
@@ -698,8 +694,6 @@ class TunnelManager {
     }
 
     // MARK: - Tunnel observeration
-
-    // MARK: - Observation
 
     /// Add tunnel observer.
     /// In order to cancel the observation, either call `removeTunnelObserver(_:)` or simply release

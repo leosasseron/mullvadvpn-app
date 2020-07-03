@@ -348,7 +348,7 @@ class TransformOperation<Input, Output>: AsyncOperation, InputOperation, OutputO
 }
 
 class ResultOperation<Success, Failure: Error>: AsyncOperation, OutputOperation {
-    var output: Result<Success, Failure>?
+    typealias Output = Result<Success, Failure>
 
     private enum Executor {
         case callback((@escaping (Result<Success, Failure>) -> Void) -> Void)

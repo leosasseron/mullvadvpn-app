@@ -359,7 +359,6 @@ private class ProductsRequestOperation: AsyncOperation, OutputOperation, SKProdu
     typealias Output = Result<SKProductsResponse, Error>
 
     private let request: SKProductsRequest
-//    var output: Result<SKProductsResponse, Error>?
 
     init(request: SKProductsRequest) {
         self.request = request

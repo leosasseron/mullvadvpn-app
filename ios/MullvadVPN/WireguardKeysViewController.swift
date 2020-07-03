@@ -105,10 +105,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
     }
 
     @IBAction func handleVerifyKey(_ sender: Any) {
-        guard let accountToken = Account.shared.token,
-            let publicKey = TunnelManager.shared.publicKey else { return }
-
-        verifyKey(accountToken: accountToken, publicKey: publicKey)
+        verifyKey()
     }
 
     // MARK: - Private
@@ -165,7 +162,7 @@ class WireguardKeysViewController: UIViewController, TunnelObserver {
         verifyKeyButton.isEnabled = enabled
     }
 
-    private func verifyKey(accountToken: String, publicKey: WireguardPublicKey) {
+    private func verifyKey() {
         self.updateViewState(.verifyingKey)
 
         TunnelManager.shared.verifyPublicKey { (result) in
