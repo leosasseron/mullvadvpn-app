@@ -62,7 +62,7 @@ enum TunnelState: Equatable {
     case reconnecting(TunnelConnectionInfo)
 }
 
-extension TunnelState: CustomStringConvertible {
+extension TunnelState: CustomStringConvertible, CustomDebugStringConvertible {
     var description: String {
         switch self {
         case .connecting:
@@ -77,9 +77,7 @@ extension TunnelState: CustomStringConvertible {
             return "reconnecting"
         }
     }
-}
 
-extension TunnelState: CustomDebugStringConvertible {
     var debugDescription: String {
         var output = "TunnelState."
 
@@ -263,7 +261,7 @@ class TunnelManager {
             stateLock.withCriticalBlock {
                 guard _tunnelState != newValue else { return }
 
-                os_log(.default, "Set tunnel state: %{public}s", "\(newValue)")
+                os_log(.default, "Set tunnel state: %{public}s", String(reflecting: newValue))
 
                 _tunnelState = newValue
 
