@@ -261,6 +261,10 @@ class TunnelManager {
     private(set) var tunnelState: TunnelState {
         set {
             stateLock.withCriticalBlock {
+                guard _tunnelState != newValue else { return }
+
+                os_log(.default, "Set tunnel state: %{public}s", "\(newValue)")
+
                 _tunnelState = newValue
 
                 observerList.forEach { (observer) in
@@ -757,7 +761,7 @@ class TunnelManager {
         }
 
         // Update the existing state
-        updateTunnelState(connectionStatus: tunnelProvider.connection.status)
+        updateTunnelState(connectionStatus: connection.status)
     }
 
     private func unregisterConnectionObserver() {
@@ -848,7 +852,6 @@ class TunnelManager {
             self.mapTunnelState(connectionStatus: connectionStatus) { (result) in
                 switch result {
                 case .success(let tunnelState):
-                    os_log(.default, "Set tunnel state: %{public}s", "\(tunnelState)")
                     self.tunnelState = tunnelState
 
                 case .failure(let error):
